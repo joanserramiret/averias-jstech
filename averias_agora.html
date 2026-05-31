@@ -2188,7 +2188,17 @@ async function subirArchivoDrive(token, nombre, blob, mimeType) {
 }
 
 // ===== FOTOS =====
-function abrirCamaraFoto(albaranRef) {
+async function abrirCamaraFoto(albaranRef) {
+  const statusEl = document.getElementById('modal-status');
+  setStatus(statusEl, 'Autorizando Drive...', 'info');
+  let token;
+  try {
+    token = await obtenerDriveToken();
+  } catch(e) {
+    setStatus(statusEl, '✗ Error autorizando Drive: ' + e.message, 'error');
+    return;
+  }
+  setStatus(statusEl, '', '');
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
@@ -2196,12 +2206,17 @@ function abrirCamaraFoto(albaranRef) {
   input.onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    await subirFotoAlbaran(albaranRef, file);
+    await subirFotoAlbaranConToken(albaranRef, file, token);
   };
   input.click();
 }
 
 async function subirFotoAlbaran(albaranRef, file) {
+  const token = await obtenerDriveToken();
+  await subirFotoAlbaranConToken(albaranRef, file, token);
+}
+
+async function subirFotoAlbaranConToken(albaranRef, file, token) {
   const statusEl = document.getElementById('modal-status');
   setStatus(statusEl, '📷 Subiendo foto a Drive...', 'info');
   try {
@@ -3029,6 +3044,7 @@ function verDetalle(i) {
   const procesado = false;
   const facturado = a.Status === 'Invoiced';
 
+  document.getElementById('modal-status').innerHTML = '';
   document.getElementById('modal-titulo').textContent = 'Albarán ' + a.Serie + '-' + a.Number;
 
   let html = '';
