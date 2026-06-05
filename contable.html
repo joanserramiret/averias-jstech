@@ -791,6 +791,7 @@ async function cargarDatos() {
 
   btn.innerHTML = '<span class="spinner"></span>Cargando...';
   statusEl.textContent = '';
+  mostrarSplash('Cargando datos contables...');
   todasFacturasC = [];
   factPorDia = {};
 
@@ -822,6 +823,7 @@ async function cargarDatos() {
         }
       });
       statusEl.textContent = 'Cargando... ' + Math.min(i+7, dates.length) + '/' + dates.length + ' días';
+      mostrarSplash('Cargando datos contables... ' + Math.min(i+7, dates.length) + '/' + dates.length + ' días');
     }
 
     todasFacturasC.sort((a,b) => new Date(b.Date) - new Date(a.Date));
@@ -829,6 +831,7 @@ async function cargarDatos() {
 
     const nFact = todasFacturasC.filter(f => f._tipo === 'factura').length;
     const nAlb = todasFacturasC.filter(f => f._tipo === 'albaran').length;
+    ocultarSplash();
     statusEl.textContent = '✓ ' + nFact + ' facturas y ' + nAlb + ' albaranes' + (errores ? ' (' + errores + ' días sin respuesta)' : '');
 
     btn.textContent = '🔍 Cargar datos';
@@ -839,6 +842,7 @@ async function cargarDatos() {
     actualizarCobros();
     actualizarIVA();
   } catch(e) {
+    ocultarSplash();
     statusEl.textContent = '✗ Error: ' + e.message;
     btn.textContent = '🔍 Cargar datos';
   }
@@ -1586,6 +1590,16 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('c-hasta').value = hoy.toISOString().split('T')[0];
   document.getElementById('login-pass').focus();
 });
+</script>
+<div id="splash-carga" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(15,31,92,0.93);flex-direction:column;align-items:center;justify-content:center;gap:18px">
+  <div style="width:48px;height:48px;border:4px solid rgba(255,255,255,0.25);border-top-color:#e87e1a;border-radius:50%;animation:splashspin 0.8s linear infinite"></div>
+  <div id="splash-carga-msg" style="color:#fff;font-size:16px;font-weight:700">Cargando datos...</div>
+  <div style="color:rgba(255,255,255,0.6);font-size:12px">Conectando con Ágora en tiempo real</div>
+</div>
+<style>@keyframes splashspin{to{transform:rotate(360deg)}}</style>
+<script>
+function mostrarSplash(msg){var s=document.getElementById('splash-carga');if(!s)return;if(msg)document.getElementById('splash-carga-msg').textContent=msg;s.style.display='flex';}
+function ocultarSplash(){var s=document.getElementById('splash-carga');if(s)s.style.display='none';}
 </script>
 </body>
 </html>
