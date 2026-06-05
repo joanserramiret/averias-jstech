@@ -2101,7 +2101,7 @@ async function pvCorreo() {
     });
     const d = await r.json();
     if (!d.ok) { alert('✗ ' + (d.error || 'Error')); btn.disabled = false; btn.textContent = '📧 Facturas del correo'; return; }
-    const fmt = x => x ? (x.error ? '⚠ ' + x.error : '✓ ' + x.pdfs + ' PDF(s) de ' + x.mensajes + ' correo(s)') : '—';
+    const fmt = x => x ? (x.error ? '⚠ ' + x.error : (x.cuentas ? Object.entries(x.cuentas).map(([u, v]) => '\n   - ' + u + ': ' + v).join('') : '✓ ' + x.pdfs + ' PDF(s) de ' + x.mensajes + ' correo(s)')) : '—';
     const seguir = confirm('📧 Extracción al cajón IA:\n· Outlook: ' + fmt(d.outlook) + '\n· Webempresa: ' + fmt(d.imap) +
                            '\n\n¿Ordenar ahora el cajón? (cada factura a su mes, duplicadas fuera)');
     if (seguir) { btn.disabled = false; btn.textContent = '📧 Facturas del correo'; pvOrdenarCajon(); return; }
