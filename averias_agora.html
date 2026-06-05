@@ -416,10 +416,10 @@
         <div class="kpi-value" id="kpi-ordenes">—</div>
         <div class="kpi-label">Órdenes pendientes</div>
       </div>
-      <div class="kpi-card rojo">
-        <div class="kpi-icon">⚠️</div>
-        <div class="kpi-value" id="kpi-sin-email">—</div>
-        <div class="kpi-label">Clientes sin email</div>
+      <div class="kpi-card rojo" onclick="switchTab('ots')" style="cursor:pointer">
+        <div class="kpi-icon">🛠</div>
+        <div class="kpi-value" id="kpi-ots">—</div>
+        <div class="kpi-label">Averías pendientes</div>
       </div>
     </div>
     <div class="dashboard-title">Acciones rápidas</div>
@@ -2449,9 +2449,22 @@ window.addEventListener('offline', () => {
 async function cargarDashboard() {
   const statusEl = document.getElementById('dashboard-status');
 
-  // KPI clientes sin email - from already loaded clients
-  const sinEmail = todosClientes.filter(c => !c.Email).length;
-  document.getElementById('kpi-sin-email').textContent = sinEmail;
+  // KPI averías (OTs) pendientes — desde el bridge
+  (async () => {
+    try {
+      const rOts = await fetch(BRIDGE_URL + '/ot', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+      const dOts = await rOts.json();
+      let ots = Array.isArray(dOts.ordenes) ? dOts.ordenes : [];
+      if (CURRENT_USER_ROLE === 'tecnico') {
+        const yo = (CURRENT_USER_NAME || '').toLowerCase();
+        ots = ots.filter(o => !o.tecnico || (o.tecnico || '').toLowerCase() === yo);
+      }
+      const pendOts = ots.filter(o => o.estado === 'pendiente' || o.estado === 'en_curso').length;
+      document.getElementById('kpi-ots').textContent = pendOts;
+    } catch(e) {
+      document.getElementById('kpi-ots').textContent = '—';
+    }
+  })();
 
   // If offline, can't load Agora data
   if (estaOffline()) {
