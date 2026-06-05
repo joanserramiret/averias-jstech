@@ -2338,11 +2338,23 @@ async function bkRemesas() {
     }).join('');
   }
   if (devoluciones.length) {
-    html += '<div style="font-size:12.5px;margin:14px 0 8px;color:#c0392b"><b>↩ ' + devoluciones.length +
-      ' devoluciones de recibos</b> · ' + bkFmt(devoluciones.reduce((s, m) => s + m.importe, 0)) + ' — candidatas a reclamar:</div>';
-    html += '<table style="width:100%;font-size:12px"><tr style="color:var(--texto-suave)"><th style="text-align:left">Fecha</th><th style="text-align:left">Banco</th><th style="text-align:left">Concepto</th><th style="text-align:right">Importe</th></tr>' +
-      devoluciones.map(m => '<tr><td>' + (m.fecha || '—') + '</td><td>' + (m.banco || '') + '</td><td>' +
+    // Dos direcciones distintas: clientes que NOS devuelven recibos (a reclamar)
+    // vs recibos NUESTROS devueltos al proveedor y pagados después (transferencia a su favor)
+    const esHaciaProveedor = m => /TRANSF\w*\.?\s+A\b/i.test(m.concepto || '');
+    const devCli = devoluciones.filter(m => !esHaciaProveedor(m));
+    const devProv = devoluciones.filter(esHaciaProveedor);
+    const tabla = lista => '<table style="width:100%;font-size:12px"><tr style="color:var(--texto-suave)"><th style="text-align:left">Fecha</th><th style="text-align:left">Banco</th><th style="text-align:left">Concepto</th><th style="text-align:right">Importe</th></tr>' +
+      lista.map(m => '<tr><td>' + (m.fecha || '—') + '</td><td>' + (m.banco || '') + '</td><td>' +
         (m.concepto || '') + '</td><td style="text-align:right;color:#c0392b;font-weight:700">' + bkFmt(m.importe) + '</td></tr>').join('') + '</table>';
+    if (devCli.length) {
+      html += '<div style="font-size:12.5px;margin:14px 0 8px;color:#c0392b"><b>↩ ' + devCli.length +
+        ' recibos devueltos por clientes</b> · ' + bkFmt(devCli.reduce((s, m) => s + m.importe, 0)) + ' — candidatos a reclamar:</div>' + tabla(devCli);
+    }
+    if (devProv.length) {
+      html += '<div style="font-size:12.5px;margin:14px 0 8px;color:#7c5c10"><b>↪ ' + devProv.length +
+        ' recibos nuestros devueltos a proveedores</b> · ' + bkFmt(devProv.reduce((s, m) => s + m.importe, 0)) +
+        ' — pagados por transferencia después (nada que reclamar; concíliarlos con la factura del proveedor):</div>' + tabla(devProv);
+    }
   }
   el.innerHTML = html;
 }
@@ -2364,7 +2376,9 @@ function exportarRemesas() {
     });
   });
   devoluciones.forEach(m => {
-    csv += ['Devolución', m.fecha, m.banco, esc(m.concepto), String(m.importe).replace('.', ','), '', '', '', 'Reclamar'].join(';') + '\n';
+    const haciaProv = /TRANSF\w*\.?\s+A\b/i.test(m.concepto || '');
+    csv += [haciaProv ? 'Devolución a proveedor' : 'Devolución de cliente', m.fecha, m.banco, esc(m.concepto),
+      String(m.importe).replace('.', ','), '', '', '', haciaProv ? 'Pagada por transferencia' : 'Reclamar'].join(';') + '\n';
   });
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
