@@ -2846,7 +2846,7 @@ function pvRender() {
         '<td style="white-space:nowrap;text-align:right" onclick="pvCorregir(\'' + ruta.replace(/'/g, "\\'") + '\')" title="Clic para corregir el importe">' + (chip || '<span style="color:#bbb;font-size:11px">sin escanear</span>') + '</td>' +
         '<td style="white-space:nowrap;color:#888;text-align:right">' + kb + '</td>' +
         '<td style="text-align:right;white-space:nowrap">' +
-          '<button onclick="pvCambiarTipo(\'' + ruta.replace(/'/g, "\\'") + '\',\'' + (dat.tipo || 'factura') + '\')" title="Corregir el tipo (factura/albarán/aviso/otro) — tu corrección manda sobre el clasificador" style="padding:3px 8px;background:#fff3e0;border:1px solid #e8b27a;border-radius:6px;font-size:11px;cursor:pointer;margin-right:4px">' + (dat.tipo === 'albaran' ? '📋' : dat.tipo === 'aviso' ? '🔔' : dat.tipo === 'otro' ? '📦' : '🧾') + (dat.tipo_manual ? '✓' : '') + '</button>' +
+          '<button onclick="pvCambiarTipo(\'' + ruta.replace(/'/g, "\\'") + '\',\'' + (dat.tipo || 'factura') + '\')" title="Corregir el tipo (factura/albarán/aviso/otro) — tu corrección manda sobre el clasificador" style="padding:3px 8px;background:#fff3e0;border:1px solid #e8b27a;border-radius:6px;font-size:11px;cursor:pointer;margin-right:4px">' + (dat.tipo === 'albaran' ? '📋' : dat.tipo === 'aviso' ? '🔔' : dat.tipo === 'otro' ? '📦' : (!dat.tipo || dat.tipo === 'factura') ? '🧾' : '🏷') + (dat.tipo_manual ? '✓' : '') + '</button>' +
           '<a href="' + url + '" target="_blank" style="padding:3px 10px;background:#1a2e6e;color:#fff;border-radius:6px;font-size:11px;font-weight:700;text-decoration:none">👁 Ver</a></td></tr>';
     }).join('');
     return '<div style="font-weight:800;font-size:13px;color:#1a2e6e;margin:12px 0 4px">' + mes + ' <span style="font-weight:400;color:#888">(' + porMes[mes].length + ')</span></div>' +
@@ -2855,13 +2855,44 @@ function pvRender() {
 }
 
 // Corrige a mano el tipo de un documento de proveedor (queda fijado: el escáner lo respeta)
-async function pvCambiarTipo(ruta, actual) {
-  const orden = ['factura', 'albaran', 'aviso', 'otro'];
-  const nombres = { factura: '🧾 factura', albaran: '📋 albarán', aviso: '🔔 aviso de pago', otro: '📦 otro (no contable)' };
-  const eleccion = prompt('Tipo actual: ' + (nombres[actual] || actual) + '\n\nEscribe el tipo correcto:\n· factura\n· albaran\n· aviso\n· otro', actual === 'factura' ? 'albaran' : 'factura');
-  if (!eleccion) return;
-  const tipo = eleccion.trim().toLowerCase().replace('á', 'a');
-  if (!orden.includes(tipo)) { alert('Tipo no válido. Usa: factura, albaran, aviso u otro.'); return; }
+function pvCambiarTipo(ruta, actual) {
+  const base = { factura: '🧾 Factura', albaran: '📋 Albarán', aviso: '🔔 Aviso de pago', otro: '📦 Otro (no contable)' };
+  // Tipos personalizados ya creados (los que no son de la lista base)
+  const extras = [...new Set(Object.values(pvDatos).map(f => f.tipo).filter(t => t && !base[t]))].sort();
+  const viejo = document.getElementById('pv-tipo-modal');
+  if (viejo) viejo.remove();
+
+  const botones = Object.entries(base).map(([t, nombre]) =>
+    '<button onclick="pvGuardarTipo(\'' + ruta.replace(/'/g, "\\'") + '\',\'' + t + '\')" style="display:block;width:100%;text-align:left;padding:10px 14px;margin-bottom:6px;border:2px solid ' + (t === actual ? '#e87e1a' : '#dde') + ';border-radius:8px;background:' + (t === actual ? '#fff3e0' : '#fff') + ';font-size:14px;cursor:pointer;font-family:inherit">' + nombre + (t === actual ? ' · <b>actual</b>' : '') + '</button>').join('') +
+    extras.map(t =>
+    '<button onclick="pvGuardarTipo(\'' + ruta.replace(/'/g, "\\'") + '\',\'' + t.replace(/'/g, "\\'") + '\')" style="display:block;width:100%;text-align:left;padding:10px 14px;margin-bottom:6px;border:2px solid ' + (t === actual ? '#e87e1a' : '#dde') + ';border-radius:8px;background:' + (t === actual ? '#fff3e0' : '#fff') + ';font-size:14px;cursor:pointer;font-family:inherit">🏷 ' + t + (t === actual ? ' · <b>actual</b>' : '') + '</button>').join('');
+
+  const div = document.createElement('div');
+  div.id = 'pv-tipo-modal';
+  div.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(15,31,92,.5);display:flex;align-items:center;justify-content:center';
+  div.innerHTML = '<div style="background:#fff;border-radius:14px;padding:22px;width:340px;max-height:80vh;overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.3)">' +
+    '<div style="font-weight:800;font-size:15px;color:#1a2e6e;margin-bottom:12px">¿Qué tipo de documento es?</div>' + botones +
+    '<div style="display:flex;gap:6px;margin-top:10px">' +
+      '<input id="pv-tipo-nuevo" placeholder="o crea un tipo nuevo..." style="flex:1;padding:9px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;font-family:inherit" onkeydown="if(event.key===\'Enter\')pvGuardarTipoNuevo(\'' + ruta.replace(/'/g, "\\'") + '\')"/>' +
+      '<button onclick="pvGuardarTipoNuevo(\'' + ruta.replace(/'/g, "\\'") + '\')" style="padding:9px 14px;background:#1a2e6e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Crear</button>' +
+    '</div>' +
+    '<div style="font-size:11px;color:#888;margin-top:8px">Los tipos que no sean "factura" quedan fuera de contabilidad, conciliación e IVA. Tu elección manda sobre el clasificador para siempre.</div>' +
+    '<button onclick="document.getElementById(\'pv-tipo-modal\').remove()" style="margin-top:12px;width:100%;padding:8px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;font-size:13px;cursor:pointer">Cancelar</button>' +
+  '</div>';
+  div.onclick = e => { if (e.target === div) div.remove(); };
+  document.body.appendChild(div);
+}
+
+function pvGuardarTipoNuevo(ruta) {
+  const v = (document.getElementById('pv-tipo-nuevo').value || '').trim().toLowerCase();
+  if (!v) return;
+  if (v.length > 30) { alert('Nombre demasiado largo (máx. 30).'); return; }
+  pvGuardarTipo(ruta, v);
+}
+
+async function pvGuardarTipo(ruta, tipo) {
+  const modal = document.getElementById('pv-tipo-modal');
+  if (modal) modal.remove();
   try {
     const r = await fetch(BRIDGE_URL_C + '/proveedores/tipo', {
       method: 'POST',
