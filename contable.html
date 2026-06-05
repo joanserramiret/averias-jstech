@@ -2084,8 +2084,20 @@ async function bkCargar() {
     if (catsEl) {
       const cats = res.categorias || [];
       catsEl.innerHTML = cats.length
-        ? cats.map(c => '<span style="background:#f0f4fb;border:1px solid #c0cbea;border-radius:8px;padding:4px 10px;font-size:12px"><b>' + (BK_CATS[c.categoria] || c.categoria) + '</b>: ' + c.n + ' movs · ' + bkFmt(c.suma) + '</span>').join(' ')
+        ? cats.map(c => '<span onclick="document.getElementById(\'bk-filtro-estado\').value=\'cat:' + c.categoria + '\';bkCargar()" style="cursor:pointer;background:#f0f4fb;border:1px solid #c0cbea;border-radius:8px;padding:4px 10px;font-size:12px" title="Ver estos movimientos"><b>' + (BK_CATS[c.categoria] || '🏷 ' + c.categoria) + '</b>: ' + c.n + ' movs · ' + bkFmt(c.suma) + '</span>').join(' ')
         : '<span style="font-size:12px;color:var(--texto-suave)">Sin movimientos categorizados — pulsa 🏷 Categorizar.</span>';
+      // Las categorías personalizadas entran solas en el desplegable de filtros
+      bkCatsExtras = cats.map(c => c.categoria).filter(c => c && !BK_CATS[c]);
+      const sel = document.getElementById('bk-filtro-estado');
+      bkCatsExtras.forEach(c => {
+        if (![...sel.options].some(o => o.value === 'cat:' + c)) {
+          const o = document.createElement('option');
+          o.value = 'cat:' + c;
+          o.textContent = '🏷 ' + c;
+          const idxTodos = [...sel.options].findIndex(o2 => o2.value === '');
+          sel.add(o, idxTodos >= 0 ? idxTodos : null);
+        }
+      });
     }
     if (!Object.keys(pvDatos).length) pvCargarDatos(new Date().getFullYear());
     bkRender();
@@ -2424,11 +2436,13 @@ async function bkCategorizar() {
   } catch(e) { alert('✗ ' + e.message); }
 }
 
+let bkCatsExtras = [];  // categorías personalizadas (vienen del resumen del banco)
+
 function bkEtiquetar(id) {
   const m = bkMovs.find(x => x.id === id) || {};
   const actual = m.categoria || '';
-  // Categorías personalizadas ya usadas en otros movimientos
-  const extras = [...new Set(bkMovs.map(x => x.categoria).filter(c => c && !BK_CATS[c]))].sort();
+  // Categorías personalizadas: las del resumen + las visibles en la lista actual
+  const extras = [...new Set(bkCatsExtras.concat(bkMovs.map(x => x.categoria)).filter(c => c && !BK_CATS[c]))].sort();
   const viejo = document.getElementById('bk-cat-modal');
   if (viejo) viejo.remove();
 
