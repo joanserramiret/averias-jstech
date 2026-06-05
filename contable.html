@@ -651,6 +651,7 @@
             <option value="personal">Cuenta personal</option>
           </select>
           <button onclick="bkGcConectar()" style="padding:8px 16px;background:#1a2e6e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">🔗 Conectar banco</button>
+          <label style="font-size:12px;color:var(--texto-suave)">desde <input type="date" id="bk-eb-desde" style="padding:6px 8px;border:1.5px solid #dde;border-radius:8px;font-size:12px"/></label>
           <button onclick="bkGcSincronizar()" id="bk-gc-sync" style="padding:8px 16px;background:#e87e1a;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">⟳ Sincronizar ahora</button>
           <span id="bk-gc-status" style="font-size:12px;color:var(--texto-suave)"></span>
         </div>
@@ -2074,10 +2075,11 @@ async function bkGcSincronizar() {
   const btn = document.getElementById('bk-gc-sync');
   btn.disabled = true; st.textContent = 'Sincronizando con el banco...';
   try {
+    const desde = document.getElementById('bk-eb-desde').value;
     const r = await fetch(BRIDGE_URL_C + '/banco/eb/sincronizar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-      body: '{}'
+      body: JSON.stringify(desde ? { desde: desde } : {})
     });
     const d = await r.json();
     if (d.ok) {
