@@ -2478,6 +2478,12 @@ async function bkRemesas() {
       const facts = m.conciliado || [];
       const sumF = facts.reduce((s, f) => s + (f.importe || 0), 0);
       const resto = m.importe - sumF;
+      // Gastos bancarios ligados a esta remesa (comparten su número en el concepto, p.ej. GTO GC DEVOL.:2026...)
+      const numRem = (m.concepto || '').match(/\d{10,}/);
+      const gastos = numRem ? movs.filter(g => g.importe < 0 && g.id !== m.id && (g.concepto || '').includes(numRem[0])) : [];
+      const gastosTxt = gastos.length
+        ? ' <span style="color:#c0392b;font-size:11px" title="' + gastos.map(g => (g.fecha || '') + ' ' + (g.concepto || '')).join(' | ').replace(/"/g, '&quot;') + '">· gastos: ' + bkFmt(gastos.reduce((s, g) => s + g.importe, 0)) + '</span>'
+        : '';
       const esPropuesta = facts.some(f => f.origen === 'propuesta');
       const estado = facts.length
         ? (Math.abs(resto) < 0.01
@@ -2505,7 +2511,7 @@ async function bkRemesas() {
         '<summary style="cursor:pointer;display:flex;gap:10px;align-items:center;font-size:12.5px;flex-wrap:wrap">' +
         '<b>' + (m.fecha || '—') + '</b><span style="color:var(--texto-suave)">' + (m.banco || '') + '</span>' +
         '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (m.concepto || '') + '">' + (m.concepto || '') + '</span>' +
-        '<b>' + bkFmt(m.importe) + '</b>' + estado + ' <span style="color:var(--texto-suave)">(' + (facts.length || 0) + ' fra.)</span></summary>' +
+        '<b>' + bkFmt(m.importe) + '</b>' + estado + ' <span style="color:var(--texto-suave)">(' + (facts.length || 0) + ' fra.)</span>' + gastosTxt + '</summary>' +
         detalle + '</details>';
     }).join('');
   }
@@ -2649,22 +2655,31 @@ async function remesaProponerCuadre(id) {
     ((await r.json()).movimientos || []).forEach(x => (x.conciliado || []).forEach(f => usadas.add(f.serie + '-' + f.numero)));
   } catch(e) { alert('Error: ' + e.message); return; }
 
-  const desde = new Date(new Date(m.fecha) - 60 * 86400000).toISOString().slice(0, 10);
-  const pool = bkCandidatos({ importe: 1 }).filter(c =>
-    c.recibo && !usadas.has(c.clave) && c.fecha && c.fecha <= m.fecha && c.fecha >= desde);
-  if (!pool.length) {
-    alert('No hay facturas cobradas por Recibo Bancario en los 60 días previos (' + desde + ' → ' + m.fecha + ').\n¿Has cargado ese período en la pestaña Facturas?');
+  // Ventanas escalonadas según el hábito real: la remesa se monta el mismo día de facturar
+  // o hasta ~15 días después (+ ~6 días hasta el abono) → primero 25 días; si no cuadra,
+  // se amplía por si alguna factura olvidada entró en la remesa siguiente (fallo humano).
+  const todosRecibo = bkCandidatos({ importe: 1 }).filter(c =>
+    c.recibo && !usadas.has(c.clave) && c.fecha && c.fecha <= m.fecha);
+  if (!todosRecibo.length) {
+    alert('No hay facturas cobradas por Recibo Bancario anteriores al abono.\n¿Has cargado ese período en la pestaña Facturas?');
     return;
   }
-  const sol = bkBuscarDesglose(pool, m.importe);
+  let sol = null, ventanaUsada = 0;
+  for (const dias of [25, 45, 90]) {
+    const desde = new Date(new Date(m.fecha) - dias * 86400000).toISOString().slice(0, 10);
+    const pool = todosRecibo.filter(c => c.fecha >= desde);
+    if (!pool.length) continue;
+    sol = bkBuscarDesglose(pool, m.importe);
+    if (sol && sol.length) { ventanaUsada = dias; break; }
+  }
   if (!sol || !sol.length) {
-    alert('No encuentro ninguna combinación de facturas-recibo que sume ' + bkFmt(m.importe) + ' exacto.\n' +
-      'Puede haber recibos de facturas más antiguas, devoluciones incluidas en el neto, o algún cobro marcado con otro método de pago en Ágora (error humano).\n' +
+    alert('No encuentro ninguna combinación de facturas-recibo que sume ' + bkFmt(m.importe) + ' exacto (probadas ventanas de 25, 45 y 90 días).\n' +
+      'Puede haber devoluciones incluidas en el neto, o algún cobro marcado con otro método de pago en Ágora (error humano).\n' +
       'Para esta, mejor el listado del banco (📎) o ✓ cerrar sin desglose.');
     return;
   }
-  const lineas = sol.map(c => '· ' + c.clave + ' — ' + (c.cliente || '¿?') + ' — ' + bkFmt(c.importe)).join('\n');
-  if (!confirm('🧮 PROPUESTA de cuadre (' + sol.length + ' facturas, suma exacta ' + bkFmt(m.importe) + '):\n\n' + lineas +
+  const lineas = sol.map(c => '· ' + c.clave + ' — ' + (c.cliente || '¿?') + ' — ' + bkFmt(c.importe) + ' (' + c.fecha + ')').join('\n');
+  if (!confirm('🧮 PROPUESTA de cuadre (' + sol.length + ' facturas, suma exacta ' + bkFmt(m.importe) + ' · ventana de ' + ventanaUsada + ' días):\n\n' + lineas +
     '\n\n⚠ Es una reconstrucción plausible, NO verificada con el banco. ¿Los clientes te cuadran con esta remesa?\n\nAceptar = conciliar así · Cancelar = no tocar nada')) return;
   try {
     const r2 = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
