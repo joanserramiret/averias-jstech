@@ -2214,6 +2214,7 @@ function bkAbrirConciliar(id) {
   bkMovActual = bkMovs.find(m => m.id === id);
   if (!bkMovActual) return;
   bkSeleccion = {};
+  bkSoloSeleccion = false;
   document.getElementById('bk-modal-mov').innerHTML =
     '<b>' + bkMovActual.fecha + '</b> · ' + (bkMovActual.banco || '') +
     '<br>' + (bkMovActual.concepto || '—') +
@@ -2293,7 +2294,14 @@ function bkModalRender() {
     return;
   }
   if (q) cands = cands.filter(c => c.clave.toLowerCase().includes(q) || c.cliente.toLowerCase().includes(q));
-  document.getElementById('bk-modal-lista').innerHTML = cands.slice(0, 200).map(c => {
+  let banner = '';
+  if (bkSoloSeleccion && !q) {
+    cands = cands.filter(c => !!bkSeleccion[c.clave]);
+    banner = '<div style="padding:8px 10px;background:#fff3e0;border-bottom:1px solid #f0d9b5;font-size:12px;color:#b45309">' +
+      '🧩 Mostrando solo la propuesta (' + cands.length + ' facturas) · ' +
+      '<a onclick="bkSoloSeleccion=false;bkModalRender()" style="cursor:pointer;text-decoration:underline;font-weight:700">ver todas las candidatas</a></div>';
+  }
+  document.getElementById('bk-modal-lista').innerHTML = banner + cands.slice(0, 200).map(c => {
     const sel = !!bkSeleccion[c.clave];
     return '<label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid #f3f3f3;cursor:pointer;background:' + (sel ? '#eef4ff' : '#fff') + '">' +
       '<input type="checkbox" ' + (sel ? 'checked' : '') + ' onchange="bkToggle(\'' + c.clave + '\')" style="width:auto"/>' +
@@ -2355,14 +2363,32 @@ function bkBuscarDesglose(cands, objetivo, maxFacturas, limiteMs) {
   return sol;
 }
 
+let bkSoloSeleccion = false;  // tras una propuesta, el modal muestra solo lo propuesto
+
 function bkDesgloseModal() {
   if (!bkMovActual) return;
   const usadas = new Set(Object.keys(bkSeleccion));
-  const cands = bkCandidatos(bkMovActual).filter(c => !usadas.has(c.clave));
+  const base = bkCandidatos(bkMovActual).filter(c => !usadas.has(c.clave));
   const objetivo = Math.abs(bkMovActual.importe) - Object.values(bkSeleccion).reduce((s, c) => s + c.importe, 0);
-  const sol = bkBuscarDesglose(cands, objetivo);
+  // Mismas rejas que el 🧮 de Remesas: solo facturas reales cobradas por Recibo Bancario,
+  // y ventanas de fecha crecientes (25 → 45 → 90 días antes del abono)
+  const mFecha = bkMovActual.fecha || '';
+  const pool0 = base.filter(c => c.recibo && c.fecha && (!mFecha || c.fecha <= mFecha) &&
+    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || ''));
+  let sol = null;
+  if (mFecha && pool0.length) {
+    for (const dias of [25, 45, 90]) {
+      const desde = new Date(new Date(mFecha) - dias * 86400000).toISOString().slice(0, 10);
+      const pool = pool0.filter(c => c.fecha >= desde);
+      if (!pool.length) continue;
+      sol = bkBuscarDesglose(pool, objetivo);
+      if (sol && sol.length) break;
+    }
+  }
+  if (!sol || !sol.length) sol = bkBuscarDesglose(pool0.length ? pool0 : base, objetivo);
   if (!sol) { alert('No he encontrado una combinación de facturas que sume exactamente ' + bkFmt(objetivo) + '.\nPrueba a cargar un período más amplio (las remesas suelen cobrar facturas de meses anteriores).'); return; }
   sol.forEach(c => { bkSeleccion[c.clave] = c; });
+  bkSoloSeleccion = true;   // enseñar SOLO la propuesta
   bkModalRender();
 }
 
