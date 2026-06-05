@@ -639,11 +639,15 @@
       </div>
 
       <div class="card" style="margin-bottom:16px">
-        <div class="card-title">Conexión automática con el banco (GoCardless)</div>
+        <div class="card-title">Conexión automática con el banco (Enable Banking)</div>
         <div id="bk-gc-estado" style="font-size:12.5px;color:var(--texto-suave);margin-bottom:10px">Comprobando configuración...</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
           <select id="bk-gc-banco" style="padding:8px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;font-family:inherit;min-width:220px">
             <option value="">— Elige tu banco —</option>
+          </select>
+          <select id="bk-eb-tipo" style="padding:8px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;font-family:inherit">
+            <option value="business" selected>Cuenta de empresa</option>
+            <option value="personal">Cuenta personal</option>
           </select>
           <button onclick="bkGcConectar()" style="padding:8px 16px;background:#1a2e6e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">🔗 Conectar banco</button>
           <button onclick="bkGcSincronizar()" id="bk-gc-sync" style="padding:8px 16px;background:#e87e1a;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">⟳ Sincronizar ahora</button>
@@ -1887,26 +1891,25 @@ function bkCerrarModal() {
   bkSeleccion = {};
 }
 
-// ── GoCardless ──
+// ── Enable Banking ──
 let bkGcBancosCargados = false;
 
 async function bkGcEstado() {
   const el = document.getElementById('bk-gc-estado');
   try {
-    const r = await fetch(BRIDGE_URL_C + '/banco/gc/estado', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const r = await fetch(BRIDGE_URL_C + '/banco/eb/estado', { headers: { 'ngrok-skip-browser-warning': 'true' } });
     const d = await r.json();
     if (!d.configurado) {
-      el.innerHTML = '⚠ Sin configurar: faltan las claves GC_SECRET_ID / GC_SECRET_KEY en config.py del bridge.';
+      el.innerHTML = '⚠ ' + (d.detalle || 'Sin configurar.');
       return;
     }
     if (!d.conexiones.length) {
       el.innerHTML = '✅ Configurado. Ningún banco conectado todavía — elige uno y pulsa Conectar.';
     } else {
-      el.innerHTML = d.conexiones.map(c => {
-        const ok = c.estado === 'LN';
-        return (ok ? '🟢' : '🟠') + ' <b>' + c.banco + '</b> — ' +
-               (ok ? c.cuentas + ' cuenta(s) vinculada(s)' : 'estado: ' + c.estado);
-      }).join('<br>');
+      el.innerHTML = d.conexiones.map(c =>
+        (c.valida ? '🟢' : '🔴') + ' <b>' + c.banco + '</b> · ' + c.iban +
+        (c.valida ? ' — autorizado hasta ' + c.valid_until : ' — ⚠ autorización caducada, reconecta')
+      ).join('<br>');
     }
     if (!bkGcBancosCargados) bkGcCargarBancos();
   } catch(e) {
@@ -1916,7 +1919,7 @@ async function bkGcEstado() {
 
 async function bkGcCargarBancos() {
   try {
-    const r = await fetch(BRIDGE_URL_C + '/banco/gc/bancos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const r = await fetch(BRIDGE_URL_C + '/banco/eb/bancos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
     const d = await r.json();
     if (!d.bancos) return;
     const sel = document.getElementById('bk-gc-banco');
@@ -1924,22 +1927,23 @@ async function bkGcCargarBancos() {
     const resto = d.bancos.filter(b => !/bankinter|sabadell/i.test(b.nombre))
                           .sort((x, y) => x.nombre.localeCompare(y.nombre));
     sel.innerHTML = '<option value="">— Elige tu banco —</option>' +
-      favoritos.map(b => '<option value="' + b.id + '">⭐ ' + b.nombre + '</option>').join('') +
-      resto.map(b => '<option value="' + b.id + '">' + b.nombre + '</option>').join('');
+      favoritos.map(b => '<option value="' + b.nombre + '">⭐ ' + b.nombre + '</option>').join('') +
+      resto.map(b => '<option value="' + b.nombre + '">' + b.nombre + '</option>').join('');
     bkGcBancosCargados = true;
   } catch(e) { /* sin configurar aún */ }
 }
 
 async function bkGcConectar() {
-  const inst = document.getElementById('bk-gc-banco').value;
+  const nombre = document.getElementById('bk-gc-banco').value;
+  const tipo = document.getElementById('bk-eb-tipo').value;
   const st = document.getElementById('bk-gc-status');
-  if (!inst) { st.textContent = 'Elige un banco primero.'; return; }
-  st.textContent = 'Creando conexión...';
+  if (!nombre) { st.textContent = 'Elige un banco primero.'; return; }
+  st.textContent = 'Creando autorización...';
   try {
-    const r = await fetch(BRIDGE_URL_C + '/banco/gc/conectar', {
+    const r = await fetch(BRIDGE_URL_C + '/banco/eb/conectar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-      body: JSON.stringify({ institution_id: inst })
+      body: JSON.stringify({ nombre: nombre, pais: 'ES', psu_type: tipo })
     });
     const d = await r.json();
     if (!d.ok) { st.textContent = '✗ ' + (d.error || 'Error'); return; }
@@ -1953,7 +1957,7 @@ async function bkGcSincronizar() {
   const btn = document.getElementById('bk-gc-sync');
   btn.disabled = true; st.textContent = 'Sincronizando con el banco...';
   try {
-    const r = await fetch(BRIDGE_URL_C + '/banco/gc/sincronizar', {
+    const r = await fetch(BRIDGE_URL_C + '/banco/eb/sincronizar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
       body: '{}'
