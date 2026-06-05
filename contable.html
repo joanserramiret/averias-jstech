@@ -2003,8 +2003,28 @@ function bkCandidatos(mov) {
       serie: f.Serie, numero: f.Number,
       fecha: (f.Date || '').slice(0, 10),
       importe: f.Totals ? f.Totals.GrossAmount : 0,
-      cliente: f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : ''
+      cliente: f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '',
+      recibo: !!(f.Payments && f.Payments.some(p => /RECIBO|DOMICILI/i.test(p.MethodName || '')))
     }));
+}
+
+// Normaliza nombres para comparar con conceptos bancarios (mayúsculas, sin acentos ni SL/SA...)
+function bkNorm(s) {
+  return (s || '').toUpperCase().normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '')
+    .replace(/[^A-Z0-9 ]/g, ' ')
+    .replace(/\b(SL|SLU|SLL|SA|SAU|SCP|CB|SOCIEDAD|LIMITADA|ANONIMA)\b/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+
+// ¿Aparece el nombre del cliente/proveedor en el concepto del movimiento?
+function bkNombreEnConcepto(cliente, concepto) {
+  const c = bkNorm(cliente), k = bkNorm(concepto);
+  if (!c || !k) return false;
+  if (k.includes(c)) return true;
+  const toks = c.split(' ').filter(t => t.length >= 4);
+  if (!toks.length) return false;
+  const hits = toks.filter(t => k.includes(t)).length;
+  return hits >= Math.min(2, toks.length);
 }
 
 function bkModalRender() {
@@ -2191,12 +2211,15 @@ async function bkAutoconciliar() {
         }
       });
       for (const n in grupos) {
-        const sol = bkBuscarDesglose(grupos[n], objetivo);
+        const grupo = grupos[n].filter(c => !c.fecha || !m.fecha || c.fecha <= m.fecha);
+        const sol = bkBuscarDesglose(grupo, objetivo);
         if (sol && sol.length) { facturasElegidas = sol; porGrupo++; break; }
       }
-      // Última bala: remesas/recibos — combinación libre que sume exacto
+      // Última bala: remesas/recibos — SOLO facturas cobradas por recibo/domiciliación
+      // y anteriores al abono (el desglose libre sobre todo robaba facturas ajenas)
       if (!facturasElegidas && m.importe > 0 && /REM\.|REMESA|RECIBOS|ADEUDOS/i.test(m.concepto || '')) {
-        const sol = bkBuscarDesglose(libres, objetivo);
+        const pool = libres.filter(c => c.recibo && (!c.fecha || !m.fecha || c.fecha <= m.fecha));
+        const sol = bkBuscarDesglose(pool, objetivo);
         if (sol && sol.length >= 2) { facturasElegidas = sol; remesas++; }
       }
     }
@@ -2213,9 +2236,11 @@ async function bkAutoconciliar() {
   }
   btn.disabled = false;
   alert('⚡ Autoconciliación:\n· ' + hechos + ' movimiento(s) conciliado(s)' +
-        (remesas ? ' (' + remesas + ' remesa(s) desglosada(s) 🧩)' : '') + '\n· ' + dudosos +
-        ' con varias facturas candidatas (revísalos a mano)\n· ' +
-        (pendientes.length - hechos - dudosos) + ' sin pareja exacta');
+        (porNombre ? '\n   · ' + porNombre + ' desempatados por nombre del cliente 🪪' : '') +
+        (porGrupo ? '\n   · ' + porGrupo + ' por suma de facturas del mismo cliente 👥' : '') +
+        (remesas ? '\n   · ' + remesas + ' remesa(s) de recibos desglosada(s) 🧩' : '') +
+        '\n· ' + dudosos + ' con varias facturas candidatas y sin nombre en el concepto (a mano)' +
+        '\n· ' + (pendientes.length - hechos - dudosos) + ' sin pareja');
   bkCargar();
 }
 
