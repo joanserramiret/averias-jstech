@@ -429,11 +429,13 @@
     <div class="nav-tab active" onclick="switchTabC('dashboard')" id="ctab-dashboard">📊 Resumen</div>
     <div class="nav-tab" onclick="switchTabC('facturas')" id="ctab-facturas">🧾 Facturas emitidas</div>
     <div class="nav-tab" onclick="switchTabC('cobros')" id="ctab-cobros">💶 Cartera de cobros</div>
-    <div class="nav-tab" onclick="switchTabC('calendario')" id="ctab-calendario">📅 Calendario</div>
     <div class="nav-tab" onclick="switchTabC('proveedores')" id="ctab-proveedores">📥 Facturas recibidas</div>
     <div class="nav-tab" onclick="switchTabC('banco')" id="ctab-banco">🏦 Tesorería</div>
     <div class="nav-tab" onclick="switchTabC('remesas')" id="ctab-remesas">🧩 Remesas y efectos</div>
-    <div class="nav-tab" onclick="switchTabC('iva')" id="ctab-iva">📋 Impuestos · IVA</div>
+    <!-- Podadas a petición de Joan (2026-06): Calendario e Impuestos·IVA — SisConta es la fuente oficial del IVA.
+         Para recuperarlas, restaurar estas dos líneas:
+    <div class="nav-tab" onclick="switchTabC('calendario')" id="ctab-calendario">📅 Calendario</div>
+    <div class="nav-tab" onclick="switchTabC('iva')" id="ctab-iva">📋 Impuestos · IVA</div> -->
   </nav>
 
   <main>
@@ -498,7 +500,7 @@
           <div class="card-title">Desglose por método de pago</div>
           <div id="pago-breakdown"><div style="color:var(--texto-suave);font-size:13px">Carga los datos para ver el desglose.</div></div>
         </div>
-        <div class="card">
+        <div class="card" style="display:none"><!-- podada: el IVA oficial lo lleva SisConta -->
           <div class="card-title">Resumen de IVA</div>
           <div id="iva-resumen"><div style="color:var(--texto-suave);font-size:13px">Carga los datos para ver el IVA.</div></div>
         </div>
