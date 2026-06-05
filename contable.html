@@ -689,6 +689,7 @@
             <select id="pv-anio" onchange="pvCargar()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit"></select>
             <input type="text" id="pv-buscar" oninput="pvRender()" placeholder="Buscar proveedor o archivo..."
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:200px"/>
+            <button onclick="pvBorrarDuplicados()" id="pv-dup" title="Eliminar del Dropbox los PDF duplicados (se conserva el original)" style="padding:6px 12px;background:#c0392b;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🧹 Duplicados</button>
             <button onclick="pvOCR()" id="pv-ocr" title="Leer con IA las facturas escaneadas o dudosas" style="padding:6px 12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🤖 OCR IA</button>
             <button onclick="pvEscanear()" id="pv-escanear" title="Extraer importes y fechas de los PDF" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🔍 Escanear importes</button>
             <button onclick="pvCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
@@ -1713,6 +1714,7 @@ function ocultarSplash(){var s=document.getElementById('splash-carga');if(s)s.st
     <input type="text" id="bk-modal-buscar" oninput="bkModalRender()" placeholder="Buscar por nº de factura o cliente..."
            style="width:100%;padding:8px 10px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-bottom:8px"/>
     <div id="bk-modal-lista" style="max-height:320px;overflow-y:auto;border:1px solid #eee;border-radius:8px"></div>
+    <button onclick="bkDesgloseModal()" style="margin-top:8px;padding:8px 14px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🧩 Buscar desglose automático (remesas)</button>
     <div id="bk-modal-suma" style="margin:12px 0;font-size:14px;font-weight:800"></div>
     <div style="display:flex;gap:10px">
       <button onclick="bkCerrarModal()" style="flex:1;padding:11px;border-radius:8px;border:1.5px solid #dde;background:#fff;font-size:13px;font-weight:700;cursor:pointer">Cancelar</button>
@@ -1896,6 +1898,48 @@ function bkSuma() {
             : ' <span style="color:#c96a10">(diferencia ' + bkFmt(dif) + ')</span>');
 }
 
+// Busca un conjunto de facturas cuya suma sea EXACTAMENTE el objetivo (para remesas)
+function bkBuscarDesglose(cands, objetivo, maxFacturas, limiteMs) {
+  maxFacturas = maxFacturas || 20; limiteMs = limiteMs || 4000;
+  const objetivoCent = Math.round(Math.abs(objetivo) * 100);
+  const arr = cands
+    .map(c => ({ c: c, cent: Math.round(c.importe * 100) }))
+    .filter(x => x.cent > 0 && x.cent <= objetivoCent)
+    .sort((x, y) => y.cent - x.cent);
+  if (!arr.length) return null;
+  const sufijo = new Array(arr.length + 1).fill(0);
+  for (let i = arr.length - 1; i >= 0; i--) sufijo[i] = sufijo[i + 1] + arr[i].cent;
+  const t0 = Date.now();
+  let sol = null;
+  function rec(idx, falta, pila) {
+    if (sol || Date.now() - t0 > limiteMs) return;
+    if (falta === 0) { sol = pila.slice(); return; }
+    if (idx >= arr.length || pila.length >= maxFacturas || sufijo[idx] < falta) return;
+    if (arr[idx].cent <= falta) {
+      pila.push(arr[idx].c);
+      rec(idx + 1, falta - arr[idx].cent, pila);
+      pila.pop();
+      if (sol) return;
+    }
+    let j = idx;
+    while (j + 1 < arr.length && arr[j + 1].cent === arr[idx].cent) j++;
+    rec(j + 1, falta, pila);
+  }
+  rec(0, objetivoCent, []);
+  return sol;
+}
+
+function bkDesgloseModal() {
+  if (!bkMovActual) return;
+  const usadas = new Set(Object.keys(bkSeleccion));
+  const cands = bkCandidatos(bkMovActual).filter(c => !usadas.has(c.clave));
+  const objetivo = Math.abs(bkMovActual.importe) - Object.values(bkSeleccion).reduce((s, c) => s + c.importe, 0);
+  const sol = bkBuscarDesglose(cands, objetivo);
+  if (!sol) { alert('No he encontrado una combinación de facturas que sume exactamente ' + bkFmt(objetivo) + '.\nPrueba a cargar un período más amplio (las remesas suelen cobrar facturas de meses anteriores).'); return; }
+  sol.forEach(c => { bkSeleccion[c.clave] = c; });
+  bkModalRender();
+}
+
 async function bkGuardarConciliacion() {
   const seles = Object.values(bkSeleccion);
   if (!seles.length) { alert('Marca al menos una factura.'); return; }
@@ -1945,29 +1989,38 @@ async function bkAutoconciliar() {
   if (!pendientes.length) { alert('No hay movimientos pendientes de conciliar en la vista actual.'); return; }
 
   btn.disabled = true;
-  let hechos = 0, dudosos = 0;
+  let hechos = 0, dudosos = 0, remesas = 0;
   for (const m of pendientes) {
     const objetivo = Math.abs(m.importe);
     const candsMov = bkCandidatos(m);
     const matches = candsMov.filter(c => !usadas.has(c.clave) && Math.abs(c.importe - objetivo) < 0.005);
+    let facturasElegidas = null;
     if (matches.length === 1) {
-      const c = matches[0];
+      facturasElegidas = [matches[0]];
+    } else if (matches.length > 1) {
+      dudosos++;
+    } else if (m.importe > 0 && /REM\.|REMESA/i.test(m.concepto || '')) {
+      // Remesa: buscar combinación de facturas no usadas que sume exacto
+      const libres = candsMov.filter(c => !usadas.has(c.clave));
+      const sol = bkBuscarDesglose(libres, objetivo);
+      if (sol && sol.length) { facturasElegidas = sol; remesas++; }
+    }
+    if (facturasElegidas) {
       try {
         const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-          body: JSON.stringify({ id: m.id, facturas: [{ serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente }] })
+          body: JSON.stringify({ id: m.id, facturas: facturasElegidas.map(c => ({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente })) })
         });
-        if ((await r.json()).ok) { hechos++; usadas.add(c.clave); }
+        if ((await r.json()).ok) { hechos++; facturasElegidas.forEach(c => usadas.add(c.clave)); }
       } catch(e) { /* seguir con el resto */ }
-    } else if (matches.length > 1) {
-      dudosos++;
     }
   }
   btn.disabled = false;
-  alert('⚡ Autoconciliación:\n· ' + hechos + ' movimiento(s) conciliado(s)\n· ' + dudosos +
+  alert('⚡ Autoconciliación:\n· ' + hechos + ' movimiento(s) conciliado(s)' +
+        (remesas ? ' (' + remesas + ' remesa(s) desglosada(s) 🧩)' : '') + '\n· ' + dudosos +
         ' con varias facturas candidatas (revísalos a mano)\n· ' +
-        (pendientes.length - hechos - dudosos) + ' sin pareja de importe exacto');
+        (pendientes.length - hechos - dudosos) + ' sin pareja exacta');
   bkCargar();
 }
 
@@ -2033,6 +2086,26 @@ async function pvEscanear() {
   btn.disabled = false; btn.textContent = '🔍 Escanear importes';
 }
 
+async function pvBorrarDuplicados() {
+  const anio = document.getElementById('pv-anio').value || new Date().getFullYear();
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/proveedores/duplicados?anio=' + anio, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const d = await r.json();
+    if (!d.total) { alert('No hay duplicados detectados. (Se detectan al pulsar "🔍 Escanear importes".)'); return; }
+    const lista = d.duplicados.slice(0, 15).map(x => '· ' + x.ruta).join('\n');
+    if (!confirm('Se BORRARÁN del Dropbox ' + d.total + ' archivo(s) duplicado(s) (el original se conserva):\n\n' +
+                 lista + (d.total > 15 ? '\n...' : '') + '\n\n¿Continuar?')) return;
+    const r2 = await fetch(BRIDGE_URL_C + '/proveedores/borrar_duplicados', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ anio: anio })
+    });
+    const d2 = await r2.json();
+    alert('🧹 ' + d2.borrados + ' duplicado(s) eliminado(s)' + (d2.errores ? ' (' + d2.errores + ' errores)' : ''));
+    pvCargar();
+  } catch(e) { alert('✗ ' + e.message); }
+}
+
 async function pvOCR() {
   const btn = document.getElementById('pv-ocr');
   const anio = document.getElementById('pv-anio').value || new Date().getFullYear();
@@ -2096,7 +2169,10 @@ function pvRender() {
       const ruta = anio + '/' + a.rel;
       const dat = pvDatos[ruta] || {};
       const est = dat.estado;
-      const chip = est === 'ok' || est === 'corregido' || est === 'ocr'
+      if (est === 'duplicado') { /* se muestra apagado */ }
+      const chip = est === 'duplicado'
+        ? '<span style="color:#bbb;font-size:11px">🧹 duplicado</span>'
+        : est === 'ok' || est === 'corregido' || est === 'ocr'
         ? '<span style="color:#1a7a3f;font-weight:800">' + bkFmt(dat.total) + (est === 'corregido' ? ' ✎' : est === 'ocr' ? ' 🤖' : '') + '</span>'
         : est === 'sin_texto'
           ? '<span style="color:#c0392b;font-size:11px">📷 escaneo</span>'
