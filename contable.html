@@ -631,6 +631,7 @@
             <option value="">Otro banco</option>
           </select>
           <input type="file" id="bk-file" accept=".n43,.q43,.csb,.aeb,.txt,.csv" style="font-size:13px"/>
+          <label style="font-size:12px;color:var(--texto-suave)">solo hasta <input type="date" id="bk-import-hasta" title="Para no solapar con Enable Banking: importa solo movimientos hasta esta fecha" style="padding:6px 8px;border:1.5px solid #dde;border-radius:8px;font-size:12px"/></label>
           <button onclick="bkImportar()" id="bk-btn-importar" style="padding:8px 18px;background:#1a2e6e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">⬆ Importar</button>
           <span id="bk-import-status" style="font-size:12px;color:var(--texto-suave)"></span>
         </div>
@@ -1741,7 +1742,9 @@ async function bkImportar() {
       const r = await fetch(BRIDGE_URL_C + '/banco/importar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-        body: JSON.stringify({ contenido: lector.result, formato: 'auto', banco: document.getElementById('bk-banco').value })
+        body: JSON.stringify({ contenido: lector.result, formato: 'auto',
+                               banco: document.getElementById('bk-banco').value,
+                               hasta: document.getElementById('bk-import-hasta').value || '' })
       });
       const d = await r.json();
       if (d.ok) {
