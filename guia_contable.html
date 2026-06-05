@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guía rápida — Panel Contable JS Technology</title>
+<style>
+  :root { --azul:#1a2e6e; --naranja:#e87e1a; --suave:#667; --borde:#e4e8f3; }
+  * { box-sizing:border-box; }
+  body { font-family:'Segoe UI',system-ui,sans-serif; margin:0; background:#f5f7fc; color:#223; line-height:1.55; }
+  header { background:var(--azul); color:#fff; padding:26px 20px; text-align:center; }
+  header h1 { margin:0; font-size:22px; }
+  header p { margin:6px 0 0; opacity:.8; font-size:14px; }
+  main { max-width:880px; margin:0 auto; padding:24px 18px 60px; }
+  h2 { color:var(--azul); font-size:18px; border-bottom:2px solid var(--borde); padding-bottom:6px; margin-top:34px; }
+  .card { background:#fff; border:1px solid var(--borde); border-radius:12px; padding:16px 20px; margin:14px 0; }
+  .paso { display:flex; gap:12px; margin:10px 0; }
+  .paso b.n { background:var(--naranja); color:#fff; min-width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0; }
+  code, .btn { background:#eef2fb; border:1px solid #ccd6ee; border-radius:6px; padding:1px 7px; font-size:13px; white-space:nowrap; }
+  .btn { font-weight:700; color:var(--azul); }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th, td { text-align:left; padding:7px 9px; border-bottom:1px solid var(--borde); vertical-align:top; }
+  th { color:var(--suave); font-size:12px; text-transform:uppercase; }
+  .aviso { background:#fff7ec; border:1px solid #f0cf9e; border-radius:10px; padding:12px 16px; font-size:13.5px; margin:12px 0; }
+  .ok { color:#1b7a3d; font-weight:700; } .rojo { color:#c0392b; font-weight:700; } .ambar { color:#b45309; font-weight:700; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📒 Panel Contable — JS Technology Menorca</h1>
+  <p>Guía rápida de uso · pensada para el trabajo diario de contabilidad</p>
+</header>
+<main>
+
+<h2>🔑 Acceso</h2>
+<div class="card">
+  <div class="paso"><b class="n">1</b><div>Abre <code>https://joanserramiret.github.io/averias-jstech/contable.html</code> (guárdalo en favoritos).</div></div>
+  <div class="paso"><b class="n">2</b><div>Entra con tu usuario y PIN de Ágora (perfil administrador).</div></div>
+  <div class="paso"><b class="n">3</b><div>Los datos viven en el ordenador de la oficina de Menorca: debe estar <b>encendido</b>. Si algo no responde, suele estar reiniciándose — espera 10 segundos y reintenta.</div></div>
+</div>
+
+<h2>🗂 Las pestañas, en una frase cada una</h2>
+<div class="card">
+<table>
+  <tr><th>Pestaña</th><th>Qué es</th></tr>
+  <tr><td><b>📊 Resumen</b></td><td>Foto del día: saldos bancarios reales, ventas, cobros y desglose por método de pago.</td></tr>
+  <tr><td><b>🧾 Facturas emitidas</b></td><td>Todas las facturas de venta de Ágora. Botón <span class="btn">Cargar</span> con el período (por defecto, el año en curso). Desde aquí se suben los PDF y el resumen diario a CAJAS.</td></tr>
+  <tr><td><b>💶 Cartera de cobros</b></td><td>Facturas emitidas pendientes de cobro, ordenadas por antigüedad.</td></tr>
+  <tr><td><b>📥 Facturas recibidas</b></td><td>Las facturas de proveedor del Dropbox (0 PROVEÏDORS), con importes leídos automáticamente, detección de duplicados y albaranes sin factura.</td></tr>
+  <tr><td><b>🏦 Tesorería</b></td><td>Movimientos de Bankinter y Sabadell con conciliación. Filtra por banco o estado, ordena clicando las cabeceras y busca cualquier cosa (importe, cliente, factura, concepto).</td></tr>
+  <tr><td><b>🧩 Remesas y efectos</b></td><td>Cada remesa con su desglose recibo a recibo, devoluciones marcadas y exportación a Excel.</td></tr>
+</table>
+</div>
+
+<h2>☀️ El día a día (5 minutos)</h2>
+<div class="card">
+  <div class="paso"><b class="n">1</b><div><b>Tesorería</b> → <span class="btn">⟳ Sincronizar ahora</span> (entran los movimientos nuevos del banco).</div></div>
+  <div class="paso"><b class="n">2</b><div><span class="btn">🏷 Categorizar</span> — nóminas, impuestos, comisiones y Seg. Social se etiquetan solos y salen de pendientes.</div></div>
+  <div class="paso"><b class="n">3</b><div><span class="btn">⚡ Conciliación automática</span> — casa cobros y pagos con sus facturas por importe y nombre de cliente.</div></div>
+  <div class="paso"><b class="n">4</b><div>Lo que quede pendiente es la lista real de trabajo: botón <span class="btn">🔗 Conciliar</span> en cada movimiento para hacerlo a mano.</div></div>
+</div>
+
+<h2>🧩 Remesas: la fuente de la verdad es el banco</h2>
+<div class="card">
+  <p style="margin-top:0">El extracto solo trae el <b>total</b> de cada remesa. Para el desglose real recibo a recibo:</p>
+  <div class="paso"><b class="n">1</b><div>Descarga del banco el detalle: en <b>Bankinter</b> el PDF "listado de adeudos de la remesa"; en <b>Sabadell</b> el fichero TXT de la remesa (el SEPA que se presentó).</div></div>
+  <div class="paso"><b class="n">2</b><div>Pestaña Remesas → <span class="btn">📎 Listado del banco (PDF)</span> → selecciona el archivo (o varios a la vez).</div></div>
+  <div class="paso"><b class="n">3</b><div>La remesa queda <span class="ok">✓ desglosada</span> con cada cliente y factura; los recibos <span class="rojo">↩ DEVUELTOS</span> salen en rojo (lista de reclamación).</div></div>
+  <p>Sin fichero del banco hay dos salidas: <span class="btn">🧮 Proponer cuadre</span> (reconstrucción a partir de las facturas cobradas por recibo — queda marcada <span class="ambar">🧮 propuesta</span>, revísala antes de aceptar) o <span class="btn">✓ Cerrar sin desglose</span>. Todo tiene <span class="btn">✕ Deshacer</span>: nada es irreversible.</p>
+</div>
+
+<h2>📥 Facturas recibidas: trucos</h2>
+<div class="card">
+<table>
+  <tr><th>Quiero…</th><th>Cómo</th></tr>
+  <tr><td>Leer los importes de los PDF nuevos</td><td><span class="btn">🔍 Escanear importes</span> (los corregidos a mano no se tocan)</td></tr>
+  <tr><td>Corregir un importe mal leído</td><td>Clic sobre el importe de la fila → escribir el valor</td></tr>
+  <tr><td>Cambiar el tipo de un documento</td><td>Botón 🧾/📋/🔔/📦 de la fila → elegir tipo (la elección manda para siempre)</td></tr>
+  <tr><td>Quitar un PDF que se ha colado</td><td>Botón 🗑 → va a la carpeta PARA BORRAR del Dropbox (y puede aprender el patrón para apartar los futuros solos)</td></tr>
+  <tr><td>Traer facturas del correo</td><td><span class="btn">📧 Facturas del correo</span> → barre los buzones y deja los PDF en el cajón → <span class="btn">🗂 Ordenar cajón IA</span> los coloca por mes en PDTE CONTABILITZAR</td></tr>
+  <tr><td>Ver albaranes sin factura posterior</td><td><span class="btn">🔎 Albaranes sin factura</span> — candidatos a reclamar al proveedor</td></tr>
+</table>
+</div>
+
+<h2>🚑 Si algo va mal</h2>
+<div class="aviso">
+  <b>"Failed to fetch" o error de conexión</b> → el ordenador de la oficina está reiniciando el servicio. Espera 10-15 segundos y reintenta.<br><br>
+  <b>No veo un botón nuevo</b> → recarga forzada con <code>Ctrl+Shift+R</code>, o añade <code>?v=2</code> al final de la dirección.<br><br>
+  <b>Saldos bancarios con ⏱</b> → el banco limita las consultas diarias; se muestra el último saldo bueno con su fecha. Se actualiza solo.<br><br>
+  <b>Cualquier otra cosa</b> → Joan. Las copias de seguridad se hacen solas cada día en Dropbox (BACKUP BRIDGE), así que nada se pierde.
+</div>
+
+<p style="text-align:center;color:var(--suave);font-size:12px;margin-top:40px">JS Technology Menorca · panel contable · junio 2026</p>
+</main>
+</body>
+</html>

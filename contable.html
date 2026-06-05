@@ -464,25 +464,25 @@
     <!-- DASHBOARD TAB -->
     <div class="tab-content active" id="ctc-dashboard">
       <div class="kpi-grid">
-        <div class="kpi-card azul">
+        <div class="kpi-card azul" onclick="irAFacturas('')" style="cursor:pointer" title="Ver todas las facturas emitidas">
           <div class="kpi-icon">🧾</div>
-          <div class="kpi-label">Total facturado</div>
+          <div class="kpi-label" id="kpi-total-label">Facturado (mes en curso)</div>
           <div class="kpi-value" id="kpi-total">—</div>
           <div class="kpi-sub" id="kpi-total-n">— facturas</div>
         </div>
-        <div class="kpi-card verde">
+        <div class="kpi-card verde" onclick="irAFacturas('pagada')" style="cursor:pointer" title="Ver la relación de facturas cobradas">
           <div class="kpi-icon">✅</div>
-          <div class="kpi-label">Cobrado</div>
+          <div class="kpi-label">Cobrado real (banco + TPV)</div>
           <div class="kpi-value verde" id="kpi-cobrado">—</div>
           <div class="kpi-sub" id="kpi-cobrado-n">— facturas pagadas</div>
         </div>
-        <div class="kpi-card naranja">
+        <div class="kpi-card naranja" onclick="switchTabC('cobros')" style="cursor:pointer" title="Ver la cartera de cobros pendientes">
           <div class="kpi-icon">⏳</div>
           <div class="kpi-label">Pendiente de cobro</div>
           <div class="kpi-value naranja" id="kpi-pendiente">—</div>
           <div class="kpi-sub" id="kpi-pendiente-n">— facturas</div>
         </div>
-        <div class="kpi-card rojo">
+        <div class="kpi-card rojo" onclick="irAFacturas('vencida')" style="cursor:pointer" title="Ver la relación de facturas vencidas">
           <div class="kpi-icon">🔴</div>
           <div class="kpi-label">Vencidas +30 días</div>
           <div class="kpi-value rojo" id="kpi-vencidas">—</div>
@@ -1021,10 +1021,42 @@ async function cargarDatos() {
 }
 
 // ===== DASHBOARD =====
+// KPI clicable: salta a Facturas emitidas con el filtro de estado puesto
+function irAFacturas(estado) {
+  switchTabC('facturas');
+  const sel = document.getElementById('fact-estado');
+  if (sel) { sel.value = estado || ''; }
+  const q = document.getElementById('fact-search');
+  if (q) q.value = '';
+  if (typeof filtrarFacturasC === 'function') filtrarFacturasC();
+}
+
+// Facturas cobradas según el BANCO: conciliadas en movimientos (y las devueltas, que vuelven a pendiente)
+let bkCobradasBanco = null;
+async function cargarCobradasBanco() {
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/movimientos?estado=conciliado', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const movs = (await r.json()).movimientos || [];
+    const cobradas = new Set(), devueltas = new Set();
+    movs.forEach(m => (m.conciliado || []).forEach(f => {
+      const k = (f.serie + '-' + f.numero).toUpperCase();
+      if (f.situacion === 'devuelto') devueltas.add(k); else cobradas.add(k);
+    }));
+    bkCobradasBanco = { cobradas, devueltas };
+  } catch(e) { bkCobradasBanco = { cobradas: new Set(), devueltas: new Set(), sinBanco: true }; }
+}
+
 function actualizarDashboard() {
+  // La verdad bancaria se carga una vez y se repinta al llegar
+  if (bkCobradasBanco === null) { bkCobradasBanco = 'cargando'; cargarCobradasBanco().then(actualizarDashboard); }
+  const banco = (bkCobradasBanco && bkCobradasBanco.cobradas) ? bkCobradasBanco : null;
+
   const hoy = new Date();
-  let total = 0, cobrado = 0, pendiente = 0, vencidas = 0;
-  let nCobradas = 0, nPendientes = 0, nVencidas = 0;
+  const mesActual = hoy.toISOString().slice(0, 7);
+  const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  let totalMes = 0, nMes = 0, totalAnio = 0, nAnio = 0;
+  let cobrado = 0, pendiente = 0, vencidas = 0;
+  let nCobradas = 0, nPendientes = 0, nVencidas = 0, nDevueltas = 0;
   const pagosTotales = {};
 
   todasFacturasC.forEach(f => {
@@ -1032,17 +1064,28 @@ function actualizarDashboard() {
     const serie = f.Serie || '';
     if (serie === 'FD' || serie === 'APPFD') return;
     const t = f.Totals ? f.Totals.GrossAmount : 0;
-    total += t;
+    totalAnio += t; nAnio++;
+    if ((f.Date || '').slice(0, 7) === mesActual) { totalMes += t; nMes++; }
+
     const pagos = f.Payments || [];
     const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
-    const esPagada = sumPagos >= t - 0.01 || (f.Status && (f.Status.toLowerCase().includes('paid') || f.Status === 'Closed' || f.Status === 'Processed'));
+    const clave = (f.Serie + '-' + f.Number).toUpperCase();
+    // Cobro inmediato en TPV (efectivo/tarjeta/bizum) = cobrada sin esperar al banco
+    const inmediato = sumPagos >= t - 0.01 && pagos.some(p => /EFECTIVO|TARJETA|CASH|CONTADO|BIZUM/i.test(p.MethodName || ''));
+    let esCobrada;
+    if (banco) {
+      // La verdad del banco: conciliada = cobrada; recibo devuelto = pendiente aunque Ágora diga otra cosa
+      esCobrada = !banco.devueltas.has(clave) && (inmediato || banco.cobradas.has(clave));
+      if (banco.devueltas.has(clave)) nDevueltas++;
+    } else {
+      esCobrada = sumPagos >= t - 0.01 || (f.Status && (f.Status.toLowerCase().includes('paid') || f.Status === 'Closed' || f.Status === 'Processed'));
+    }
 
-    if (esPagada) { cobrado += t; nCobradas++; }
+    if (esCobrada) { cobrado += t; nCobradas++; }
     else {
       pendiente += t;
       nPendientes++;
-      const fecha = new Date(f.Date);
-      const dias = (hoy - fecha) / 86400000;
+      const dias = (hoy - new Date(f.Date)) / 86400000;
       if (dias > 30) { vencidas += t; nVencidas++; }
     }
 
@@ -1054,12 +1097,14 @@ function actualizarDashboard() {
     });
   });
 
-  document.getElementById('kpi-total').textContent = total.toFixed(2) + '€';
-  document.getElementById('kpi-total-n').textContent = todasFacturasC.length + ' facturas';
+  const lbl = document.getElementById('kpi-total-label');
+  if (lbl) lbl.textContent = 'Facturado en ' + MESES[hoy.getMonth()];
+  document.getElementById('kpi-total').textContent = totalMes.toFixed(2) + '€';
+  document.getElementById('kpi-total-n').textContent = nMes + ' fra. del mes · año: ' + totalAnio.toFixed(2) + '€ (' + nAnio + ' fra.)';
   document.getElementById('kpi-cobrado').textContent = cobrado.toFixed(2) + '€';
-  document.getElementById('kpi-cobrado-n').textContent = nCobradas + ' facturas pagadas';
+  document.getElementById('kpi-cobrado-n').textContent = nCobradas + ' cobradas' + (banco ? (banco.sinBanco ? ' (sin banco: estimado)' : ' · verdad bancaria ✓') : ' (cargando banco...)');
   document.getElementById('kpi-pendiente').textContent = pendiente.toFixed(2) + '€';
-  document.getElementById('kpi-pendiente-n').textContent = nPendientes + ' facturas';
+  document.getElementById('kpi-pendiente-n').textContent = nPendientes + ' facturas' + (nDevueltas ? ' · ' + nDevueltas + ' con recibo devuelto ↩' : '');
   document.getElementById('kpi-vencidas').textContent = vencidas.toFixed(2) + '€';
   document.getElementById('kpi-vencidas-n').textContent = nVencidas + ' facturas';
 
@@ -1101,7 +1146,16 @@ function filtrarFacturasC() {
     const t = f.Totals ? f.Totals.GrossAmount : 0;
     const pagos = f.Payments || [];
     const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
-    const esPagada = sumPagos >= t - 0.01 || (f.Status && (f.Status === 'Closed' || f.Status === 'Processed' || f.Status.toLowerCase().includes('paid')));
+    // Misma verdad bancaria que el dashboard, para que los números cuadren entre vistas
+    const bancoF = (bkCobradasBanco && bkCobradasBanco.cobradas) ? bkCobradasBanco : null;
+    let esPagada;
+    if (bancoF) {
+      const clave = (f.Serie + '-' + f.Number).toUpperCase();
+      const inmediato = sumPagos >= t - 0.01 && pagos.some(p => /EFECTIVO|TARJETA|CASH|CONTADO|BIZUM/i.test(p.MethodName || ''));
+      esPagada = !bancoF.devueltas.has(clave) && (inmediato || bancoF.cobradas.has(clave));
+    } else {
+      esPagada = sumPagos >= t - 0.01 || (f.Status && (f.Status === 'Closed' || f.Status === 'Processed' || f.Status.toLowerCase().includes('paid')));
+    }
     const dias = (hoy - new Date(f.Date)) / 86400000;
     const esVencida = !esPagada && dias > 30;
 
@@ -1548,13 +1602,22 @@ function actualizarCobros() {
     : '<div style="color:var(--texto-suave);font-size:13px">Sin datos.</div>';
 
   // Pendientes
+  const banco = (bkCobradasBanco && bkCobradasBanco.cobradas) ? bkCobradasBanco : null;
   const pendientes = todasFacturasC.filter(f => {
     if (f._tipo !== 'factura') return false;
     const serie = f.Serie || '';
     if (serie === 'FD' || serie === 'APPFD') return false;
-    if (f.Status && (f.Status === 'Closed' || f.Status === 'Processed' || f.Status.toLowerCase().includes('paid'))) return false;
     const t = f.Totals ? f.Totals.GrossAmount : 0;
-    const sumPagos = (f.Payments||[]).reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
+    const pagos = f.Payments || [];
+    const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
+    if (banco) {
+      // Verdad bancaria: devuelta = pendiente; cobrada = TPV inmediato o conciliada en banco
+      const clave = (f.Serie + '-' + f.Number).toUpperCase();
+      if (banco.devueltas.has(clave)) return true;
+      const inmediato = sumPagos >= t - 0.01 && pagos.some(p => /EFECTIVO|TARJETA|CASH|CONTADO|BIZUM/i.test(p.MethodName || ''));
+      return !(inmediato || banco.cobradas.has(clave));
+    }
+    if (f.Status && (f.Status === 'Closed' || f.Status === 'Processed' || f.Status.toLowerCase().includes('paid'))) return false;
     return sumPagos < t - 0.01;
   }).sort((a,b) => new Date(a.Date) - new Date(b.Date));
 
