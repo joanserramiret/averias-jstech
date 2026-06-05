@@ -2248,7 +2248,13 @@ function bkCandidatos(mov) {
       fecha: (f.Date || '').slice(0, 10),
       importe: f.Totals ? f.Totals.GrossAmount : 0,
       cliente: f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '',
-      recibo: !!(f.Payments && f.Payments.some(p => /RECIBO|DOMICILI/i.test(p.MethodName || '')))
+      // Cobrada por "Recibo Bancario (Cargo en Cuenta Cliente)" y el recibo cubre el TOTAL
+      recibo: (function() {
+        const tot = f.Totals ? f.Totals.GrossAmount : 0;
+        const sumRecibo = (f.Payments || []).filter(p => /RECIBO|DOMICILI/i.test(p.MethodName || ''))
+          .reduce((s, p) => s + Math.abs(p.Amount || p.PaidAmount || 0), 0);
+        return tot > 0 && sumRecibo >= tot - 0.01;
+      })()
     }));
 }
 
@@ -2748,8 +2754,10 @@ async function remesaProponerCuadre(id) {
   // Ventanas escalonadas según el hábito real: la remesa se monta el mismo día de facturar
   // o hasta ~15 días después (+ ~6 días hasta el abono) → primero 25 días; si no cuadra,
   // se amplía por si alguna factura olvidada entró en la remesa siguiente (fallo humano).
+  // SOLO facturas de verdad (fuera tickets y devoluciones) cobradas íntegramente por Recibo Bancario
   const todosRecibo = bkCandidatos({ importe: 1 }).filter(c =>
-    c.recibo && !usadas.has(c.clave) && c.fecha && c.fecha <= m.fecha);
+    c.recibo && !usadas.has(c.clave) && c.fecha && c.fecha <= m.fecha &&
+    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || ''));
   if (!todosRecibo.length) {
     alert('No hay facturas cobradas por Recibo Bancario anteriores al abono.\n¿Has cargado ese período en la pestaña Facturas?');
     return;
