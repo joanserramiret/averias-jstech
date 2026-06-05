@@ -1075,6 +1075,12 @@
     </div>
   </div>
 </div>
+<div id="splash-carga" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(15,31,92,0.93);flex-direction:column;align-items:center;justify-content:center;gap:18px">
+  <div style="width:48px;height:48px;border:4px solid rgba(255,255,255,0.25);border-top-color:#e87e1a;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+  <div id="splash-carga-msg" style="color:#fff;font-size:16px;font-weight:700">Cargando datos...</div>
+  <div style="color:rgba(255,255,255,0.6);font-size:12px">Conectando con Ágora en tiempo real</div>
+</div>
+
 <script>
 // ── ROLES DE USUARIO ──
 // Perfil técnico en Ágora — ProfileId = 5
@@ -1082,6 +1088,17 @@ const PERFIL_TECNICO_IDS = [5];
 let CURRENT_USER_ROLE = 'admin'; // 'admin' | 'tecnico'
 
 const BRIDGE_URL = 'https://uncooked-sprung-unpinned.ngrok-free.dev';
+
+function mostrarSplash(msg) {
+  const s = document.getElementById('splash-carga');
+  if (!s) return;
+  if (msg) document.getElementById('splash-carga-msg').textContent = msg;
+  s.style.display = 'flex';
+}
+function ocultarSplash() {
+  const s = document.getElementById('splash-carga');
+  if (s) s.style.display = 'none';
+}
 const HORA_PRODUCT_ID = 1758866744;
 const VAT_ID = 4;
 const VAT_RATE = 0.21;
@@ -2955,9 +2972,15 @@ async function doLogin() {
     localStorage.setItem('jstech_user_role', CURRENT_USER_ROLE);
     aplicarPermisos();
 
-    await cargarClientes();
-    switchTab('dashboard');
-    cargarDashboard();
+    mostrarSplash('Cargando clientes...');
+    try {
+      await cargarClientes();
+      mostrarSplash('Preparando el panel...');
+      switchTab('dashboard');
+      await cargarDashboard();
+    } finally {
+      ocultarSplash();
+    }
   } catch(e) {
     setStatus(statusEl, 'Error al conectar: ' + e.message, 'error');
   }
