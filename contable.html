@@ -1566,12 +1566,40 @@ function actualizarCobros() {
 }
 
 // ===== IVA TAB =====
+let ivaSoportadoPorT = null;  // {1..4: {base, cuota, n, estimadas}}
+
+// IVA soportado desde las facturas de proveedor escaneadas (base/cuota reales del PDF
+// cuando cuadran con el total; si no, estimación al 21% marcada con ~)
+async function ivaCargarSoportado() {
+  const anio = new Date().getFullYear();
+  if (!Object.keys(pvDatos).length) { try { await pvCargarDatos(anio); } catch(e) {} }
+  const porT = { 1:{base:0,cuota:0,n:0,estimadas:0}, 2:{base:0,cuota:0,n:0,estimadas:0},
+                 3:{base:0,cuota:0,n:0,estimadas:0}, 4:{base:0,cuota:0,n:0,estimadas:0} };
+  Object.values(pvDatos).forEach(f => {
+    if (f.tipo && f.tipo !== 'factura') return;             // albaranes/avisos/pases fuera
+    if (!['ok', 'corregido', 'ocr'].includes(f.estado)) return;
+    if (f.duplicado_de || !f.total || !f.fecha) return;
+    if (String(f.fecha).slice(0, 4) !== String(anio)) return;
+    const t = Math.ceil(parseInt(f.fecha.slice(5, 7)) / 3);
+    if (!porT[t]) return;
+    let base = f.base, cuota = f.cuota;
+    if (!(base > 0 && cuota >= 0 && Math.abs(base + cuota - f.total) < 0.06)) {
+      base = f.total / 1.21; cuota = f.total - base;        // estimación 21%
+      porT[t].estimadas++;
+    }
+    porT[t].base += base; porT[t].cuota += cuota; porT[t].n++;
+  });
+  ivaSoportadoPorT = porT;
+  actualizarIVA();
+}
+
 function actualizarIVA() {
-  let baseTotal = 0, ivaTotal = 0;
+  let baseTotal = 0, ivaTotal = 0, nFact = 0;
   const porTrimestre = { 1:{ base:0, iva:0, n:0 }, 2:{ base:0, iva:0, n:0 }, 3:{ base:0, iva:0, n:0 }, 4:{ base:0, iva:0, n:0 } };
 
   todasFacturasC.forEach(f => {
-    if (!f.Totals) return;
+    if (!f.Totals || f._tipo !== 'factura') return;
+    nFact++;
     baseTotal += f.Totals.NetAmount || 0;
     ivaTotal += f.Totals.VatAmount || 0;
     const mes = new Date(f.Date).getMonth() + 1;
@@ -1581,24 +1609,36 @@ function actualizarIVA() {
     porTrimestre[t].n++;
   });
 
+  const sop = ivaSoportadoPorT;
+  const sopCuota = sop ? Object.values(sop).reduce((s, d) => s + d.cuota, 0) : null;
+  const sopBase = sop ? Object.values(sop).reduce((s, d) => s + d.base, 0) : null;
+  const sopN = sop ? Object.values(sop).reduce((s, d) => s + d.n, 0) : 0;
+  const sopEst = sop ? Object.values(sop).reduce((s, d) => s + d.estimadas, 0) : 0;
+
   document.getElementById('iva-detalle').innerHTML =
-    '<div class="iva-row"><span class="iva-label">Nº facturas</span><span class="iva-value">' + todasFacturasC.length + '</span></div>' +
-    '<div class="iva-row"><span class="iva-label">Base imponible</span><span class="iva-value">' + baseTotal.toFixed(2) + '€</span></div>' +
-    '<div class="iva-row"><span class="iva-label">IVA devengado (21%)</span><span class="iva-value">' + ivaTotal.toFixed(2) + '€</span></div>' +
-    '<div class="iva-row"><span class="iva-label">Total facturas</span><span class="iva-value">' + (baseTotal + ivaTotal).toFixed(2) + '€</span></div>';
+    '<div class="iva-row"><span class="iva-label">Nº facturas emitidas</span><span class="iva-value">' + nFact + '</span></div>' +
+    '<div class="iva-row"><span class="iva-label">Base imponible ventas</span><span class="iva-value">' + baseTotal.toFixed(2) + '€</span></div>' +
+    '<div class="iva-row"><span class="iva-label">IVA devengado (repercutido)</span><span class="iva-value">' + ivaTotal.toFixed(2) + '€</span></div>' +
+    (sop === null
+      ? '<div class="iva-row"><span class="iva-label">IVA soportado</span><span style="color:var(--texto-suave);font-size:12px">cargando proveedores...</span></div>'
+      : '<div class="iva-row"><span class="iva-label">Base compras (' + sopN + ' fra. proveedor)</span><span class="iva-value">' + sopBase.toFixed(2) + '€</span></div>' +
+        '<div class="iva-row"><span class="iva-label">IVA soportado' + (sopEst ? ' <span style="font-size:11px;color:#c96a10">(~' + sopEst + ' estimadas al 21%)</span>' : '') + '</span><span class="iva-value">' + sopCuota.toFixed(2) + '€</span></div>' +
+        '<div class="iva-row" style="border-top:2px solid var(--borde);margin-top:4px;padding-top:8px"><span class="iva-label"><b>Resultado (devengado − soportado)</b></span><span class="iva-value" style="color:' + (ivaTotal - sopCuota >= 0 ? '#c0392b' : '#1b7a3d') + '">' + (ivaTotal - sopCuota).toFixed(2) + '€ ' + (ivaTotal - sopCuota >= 0 ? 'a ingresar' : 'a compensar') + '</span></div>');
 
   const tNames = { 1:'1T Ene-Mar', 2:'2T Abr-Jun', 3:'3T Jul-Sep', 4:'4T Oct-Dic' };
-  document.getElementById('iva-trimestres').innerHTML = Object.entries(porTrimestre).map(([t, d]) =>
-    d.n > 0
-      ? '<div class="iva-row">' +
-          '<span class="iva-label">' + tNames[t] + ' (' + d.n + ' fact.)</span>' +
-          '<span style="display:flex;gap:16px">' +
-            '<span style="color:var(--texto-suave);font-size:12px">Base: ' + d.base.toFixed(2) + '€</span>' +
-            '<span class="iva-value">IVA: ' + d.iva.toFixed(2) + '€</span>' +
-          '</span>' +
-        '</div>'
-      : '<div class="iva-row"><span class="iva-label">' + tNames[t] + '</span><span style="color:var(--texto-suave);font-size:12px">Sin datos</span></div>'
-  ).join('');
+  document.getElementById('iva-trimestres').innerHTML = Object.entries(porTrimestre).map(([t, d]) => {
+    const s = sop ? sop[t] : null;
+    if (!d.n && (!s || !s.n)) return '<div class="iva-row"><span class="iva-label">' + tNames[t] + '</span><span style="color:var(--texto-suave);font-size:12px">Sin datos</span></div>';
+    const resultado = s ? d.iva - s.cuota : null;
+    return '<div class="iva-row">' +
+      '<span class="iva-label">' + tNames[t] + ' <span style="font-size:11px;color:var(--texto-suave)">(' + d.n + ' emit.' + (s ? ' / ' + s.n + ' prov.' : '') + ')</span></span>' +
+      '<span style="display:flex;gap:14px;align-items:center">' +
+        '<span style="color:var(--texto-suave);font-size:12px">Dev: ' + d.iva.toFixed(2) + '€</span>' +
+        (s ? '<span style="color:var(--texto-suave);font-size:12px">Sop' + (s.estimadas ? '~' : '') + ': ' + s.cuota.toFixed(2) + '€</span>' +
+             '<span class="iva-value" style="color:' + (resultado >= 0 ? '#c0392b' : '#1b7a3d') + '">' + resultado.toFixed(2) + '€</span>'
+           : '<span class="iva-value">' + d.iva.toFixed(2) + '€</span>') +
+      '</span></div>';
+  }).join('');
 }
 
 function exportarIVA() {
@@ -1850,6 +1890,7 @@ function switchTabC(tab) {
   if (tab === 'calendario') renderCalendar();
   if (tab === 'banco') { bkCargar(); bkGcEstado(); }
   if (tab === 'remesas') bkRemesas();
+  if (tab === 'iva') ivaCargarSoportado();
   if (tab === 'proveedores' && !pvArchivos.length) pvCargar();
 }
 
