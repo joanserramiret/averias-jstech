@@ -2168,21 +2168,37 @@ async function bkAutoconciliar() {
   if (!pendientes.length) { alert('No hay movimientos pendientes de conciliar en la vista actual.'); return; }
 
   btn.disabled = true;
-  let hechos = 0, dudosos = 0, remesas = 0;
+  let hechos = 0, dudosos = 0, remesas = 0, porNombre = 0, porGrupo = 0;
   for (const m of pendientes) {
     const objetivo = Math.abs(m.importe);
-    const candsMov = bkCandidatos(m);
-    const matches = candsMov.filter(c => !usadas.has(c.clave) && Math.abs(c.importe - objetivo) < 0.005);
+    const libres = bkCandidatos(m).filter(c => !usadas.has(c.clave));
+    const matches = libres.filter(c => Math.abs(c.importe - objetivo) < 0.01);
     let facturasElegidas = null;
     if (matches.length === 1) {
       facturasElegidas = [matches[0]];
     } else if (matches.length > 1) {
-      dudosos++;
-    } else if (m.importe > 0 && /REM\.|REMESA/i.test(m.concepto || '')) {
-      // Remesa: buscar combinación de facturas no usadas que sume exacto
-      const libres = candsMov.filter(c => !usadas.has(c.clave));
-      const sol = bkBuscarDesglose(libres, objetivo);
-      if (sol && sol.length) { facturasElegidas = sol; remesas++; }
+      // Mismo importe en varias facturas → desempatar por nombre en el concepto del banco
+      const conNombre = matches.filter(c => bkNombreEnConcepto(c.cliente, m.concepto));
+      if (conNombre.length === 1) { facturasElegidas = [conNombre[0]]; porNombre++; }
+      else dudosos++;
+    } else {
+      // Sin importe exacto → ¿paga varias facturas de un mismo cliente/proveedor citado en el concepto?
+      const grupos = {};
+      libres.forEach(c => {
+        if (c.cliente && bkNombreEnConcepto(c.cliente, m.concepto)) {
+          const n = bkNorm(c.cliente);
+          (grupos[n] = grupos[n] || []).push(c);
+        }
+      });
+      for (const n in grupos) {
+        const sol = bkBuscarDesglose(grupos[n], objetivo);
+        if (sol && sol.length) { facturasElegidas = sol; porGrupo++; break; }
+      }
+      // Última bala: remesas/recibos — combinación libre que sume exacto
+      if (!facturasElegidas && m.importe > 0 && /REM\.|REMESA|RECIBOS|ADEUDOS/i.test(m.concepto || '')) {
+        const sol = bkBuscarDesglose(libres, objetivo);
+        if (sol && sol.length >= 2) { facturasElegidas = sol; remesas++; }
+      }
     }
     if (facturasElegidas) {
       try {
