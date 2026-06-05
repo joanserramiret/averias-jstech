@@ -518,7 +518,7 @@
             <option value="vencida">Vencidas</option>
           </select>
           <button class="btn-secondary" onclick="descargarSeleccionadas()">⬇ Descargar seleccionadas</button>
-          <button class="btn-naranja" onclick="subirDropboxSeleccionadas()">📦 Subir a Dropbox</button>
+          <button class="btn-naranja" onclick="subirCajasFaltantes()" title="Copia en PDF a Dropbox · CAJAS las facturas de los días que falten">📦 Subir a CAJAS (faltantes)</button>
           <button class="btn-secondary" onclick="exportarExcel()">📊 Excel</button>
         </div>
       </div>
@@ -1181,47 +1181,68 @@ function previsualizarFacturaC(i) {
   w.document.close();
 }
 
-// ===== DROPBOX =====
-let dropboxToken = null;
+// ===== CAJAS (Dropbox · CONTABLE JS-TECH / CAJAS, vía bridge) =====
 
-function subirDropboxSeleccionadas() {
-  const sel = getSeleccionadas();
-  if (!sel.length) { alert('Selecciona al menos una factura.'); return; }
+async function blobABase64C(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
 
-  if (!dropboxToken) {
-    const token = prompt('Introduce tu token de Dropbox (lo puedes obtener en dropbox.com/developers):');
-    if (!token) return;
-    dropboxToken = token;
+async function subirCajasFaltantes() {
+  const facts = todasFacturasC.filter(f => f.Status !== 'Cancelled' && f.Date);
+  if (!facts.length) { alert('Primero carga las facturas del período.'); return; }
+  const statusEl = document.getElementById('c-status');
+
+  // Rango de fechas cargado
+  const fechas = facts.map(f => f.Date.split('T')[0]).sort();
+  const desde = fechas[0], hasta = fechas[fechas.length - 1];
+
+  setStatusC(statusEl, 'Comprobando qué falta en CAJAS...', 'loading');
+  let existentes = {};
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/cajas/existentes?desde=' + desde + '&hasta=' + hasta,
+      { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    existentes = (await r.json()).existentes || {};
+  } catch(e) {
+    setStatusC(statusEl, '✗ No se pudo consultar CAJAS: ' + e.message, 'error');
+    return;
   }
 
-  let subidas = 0;
-  const total = sel.length;
-  const statusEl = document.getElementById('c-status');
-  setStatusC(statusEl, 'Subiendo a Dropbox... 0/' + total, 'loading');
+  // Faltantes: ni el PDF de la factura ni el día completo (facturas.zip/xls antiguos)
+  const faltan = facts.filter(f => {
+    const fecha = f.Date.split('T')[0];
+    const dia = existentes[fecha] || [];
+    if (dia.includes('__DIA_YA_SUBIDO__')) return false;
+    return !dia.includes((f.Serie + '-' + f.Number + '.pdf').toUpperCase());
+  });
 
-  (async () => {
-    for (let i = 0; i < sel.length; i++) {
-      const f = sel[i];
-      try {
-        const blob = await generarPDFBlobC(f);
-        const path = '/JS Technology Facturas/' + f.Serie + '-' + f.Number + '.pdf';
-        await fetch('https://content.dropboxapi.com/2/files/upload', {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + dropboxToken,
-            'Dropbox-API-Arg': JSON.stringify({ path, mode: 'overwrite', autorename: false }),
-            'Content-Type': 'application/octet-stream'
-          },
-          body: blob
-        });
-        subidas++;
-        if (subidas === total) setStatusC(statusEl, '✓ ' + total + ' facturas subidas a Dropbox (PDF)', 'success');
-        else setStatusC(statusEl, 'Subiendo a Dropbox... ' + subidas + '/' + total, 'loading');
-      } catch(e) {
-        setStatusC(statusEl, '✗ Error Dropbox: ' + e.message, 'error');
-      }
-    }
-  })();
+  if (!faltan.length) {
+    setStatusC(statusEl, '✓ CAJAS al día: todas las facturas del período (' + desde + ' → ' + hasta + ') ya están subidas', 'success');
+    return;
+  }
+  if (!confirm('Faltan ' + faltan.length + ' facturas en CAJAS (' + desde + ' → ' + hasta + ').\n¿Generar los PDF y subirlos ahora?')) return;
+
+  let ok = 0, errores = 0;
+  for (let i = 0; i < faltan.length; i++) {
+    const f = faltan[i];
+    const nombre = f.Serie + '-' + f.Number + '.pdf';
+    setStatusC(statusEl, 'Subiendo a CAJAS... ' + (i + 1) + '/' + faltan.length + ' (' + nombre + ')', 'loading');
+    try {
+      const blob = await generarPDFBlobC(f);
+      const r = await fetch(BRIDGE_URL_C + '/cajas/subir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ fecha: f.Date.split('T')[0], nombre, pdf_base64: await blobABase64C(blob) })
+      });
+      const j = await r.json();
+      if (j.ok) ok++; else { errores++; console.warn('[cajas]', nombre, j.error); }
+    } catch(e) { errores++; console.warn('[cajas]', nombre, e.message); }
+  }
+  setStatusC(statusEl, (errores ? '⚠ ' : '✓ ') + ok + ' facturas subidas a CAJAS' +
+    (errores ? ' · ' + errores + ' con error (mira la consola)' : ''), errores ? 'error' : 'success');
 }
 
 // ===== EXCEL EXPORT =====
