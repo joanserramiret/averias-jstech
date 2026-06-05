@@ -613,19 +613,19 @@
     <div class="tab-content" id="ctc-banco">
       <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
         <div class="kpi-card azul">
-          <div class="kpi-icon">📥</div>
-          <div class="kpi-label">Movimientos sin conciliar</div>
+          <div class="kpi-icon">🎯</div>
+          <div class="kpi-label">Cuadre del banco</div>
           <div class="kpi-value" id="bk-kpi-pendientes">—</div>
           <div class="kpi-sub" id="bk-kpi-rango"></div>
         </div>
         <div class="kpi-card verde">
           <div class="kpi-icon">⬇</div>
-          <div class="kpi-label">Abonos sin conciliar</div>
+          <div class="kpi-label">Cobros por explicar <span style="font-weight:400;font-size:10px">(↔ emitidas y remesas)</span></div>
           <div class="kpi-value verde" id="bk-kpi-abonos">—</div>
         </div>
         <div class="kpi-card naranja">
           <div class="kpi-icon">⬆</div>
-          <div class="kpi-label">Cargos sin conciliar</div>
+          <div class="kpi-label">Pagos por explicar <span style="font-weight:400;font-size:10px">(↔ facturas recibidas)</span></div>
           <div class="kpi-value naranja" id="bk-kpi-cargos">—</div>
         </div>
       </div>
@@ -1004,17 +1004,16 @@ async function cargarDatos() {
 
     const nFact = todasFacturasC.filter(f => f._tipo === 'factura').length;
     const nAlb = todasFacturasC.filter(f => f._tipo === 'albaran').length;
-    // Chivato de series: para detectar series que Ágora no está devolviendo
+    // Recuento por serie solo en consola (para depurar si algún día faltan series)
     const porSerie = {};
     todasFacturasC.forEach(f => { const s = f.Serie || '¿?'; porSerie[s] = (porSerie[s] || 0) + 1; });
-    const seriesTxt = Object.entries(porSerie).sort().map(([s, n]) => s + '×' + n).join(' · ');
     console.log('[carga] documentos por serie:', porSerie);
     ocultarSplash();
     if (diasFallidosC.length) {
       statusEl.textContent = '⚠ OJO: ' + diasFallidosC.length + ' día(s) sin respuesta tras 3 intentos (' +
         diasFallidosC.slice(0, 5).join(', ') + (diasFallidosC.length > 5 ? '...' : '') +
         ') — sus facturas NO están cargadas. Vuelve a pulsar Cargar.';
-    } else statusEl.textContent = '✓ ' + nFact + ' facturas y ' + nAlb + ' albaranes' + (errores ? ' (' + errores + ' días sin respuesta)' : '') + '  [' + seriesTxt + ']';
+    } else statusEl.textContent = '✓ ' + nFact + ' facturas y ' + nAlb + ' albaranes' + (errores ? ' (' + errores + ' días sin respuesta)' : '');
 
     btn.textContent = '🔍 Cargar datos';
 
@@ -2073,10 +2072,14 @@ async function bkCargar() {
     bkMovs = (await rMov.json()).movimientos || [];
     bkActualizarBancos();
     const res = await rRes.json();
-    document.getElementById('bk-kpi-pendientes').textContent = res.pendientes ?? '—';
+    // Cuadre = % de movimientos explicados (conciliados con documento o categorizados)
+    const tot = res.total || 0, pend = res.pendientes || 0;
+    const pct = tot ? Math.round((tot - pend) / tot * 100) : 0;
+    document.getElementById('bk-kpi-pendientes').textContent = tot ? pct + '%' : '—';
     document.getElementById('bk-kpi-abonos').textContent = bkFmt(res.abonos_pendientes);
     document.getElementById('bk-kpi-cargos').textContent = bkFmt(Math.abs(res.cargos_pendientes || 0));
-    document.getElementById('bk-kpi-rango').textContent = (res.primera_fecha && res.ultima_fecha) ? res.primera_fecha + ' → ' + res.ultima_fecha : '';
+    document.getElementById('bk-kpi-rango').textContent = (tot ? (tot - pend) + ' de ' + tot + ' movimientos explicados · ' : '') +
+      ((res.primera_fecha && res.ultima_fecha) ? res.primera_fecha + ' → ' + res.ultima_fecha : '');
     const catsEl = document.getElementById('bk-categorias');
     if (catsEl) {
       const cats = res.categorias || [];
