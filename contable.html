@@ -638,6 +638,22 @@
         </div>
       </div>
 
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title">Conexión automática con el banco (GoCardless)</div>
+        <div id="bk-gc-estado" style="font-size:12.5px;color:var(--texto-suave);margin-bottom:10px">Comprobando configuración...</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <select id="bk-gc-banco" style="padding:8px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;font-family:inherit;min-width:220px">
+            <option value="">— Elige tu banco —</option>
+          </select>
+          <button onclick="bkGcConectar()" style="padding:8px 16px;background:#1a2e6e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">🔗 Conectar banco</button>
+          <button onclick="bkGcSincronizar()" id="bk-gc-sync" style="padding:8px 16px;background:#e87e1a;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">⟳ Sincronizar ahora</button>
+          <span id="bk-gc-status" style="font-size:12px;color:var(--texto-suave)"></span>
+        </div>
+        <div style="font-size:11px;color:var(--texto-suave);margin-top:6px">
+          Conectas tu banco una vez (autorización de solo-lectura, caduca a los 90 días) y los movimientos entran solos al pulsar Sincronizar.
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
           <span>Movimientos</span>
@@ -1637,7 +1653,7 @@ function switchTabC(tab) {
   document.getElementById('ctab-' + tab).classList.add('active');
   document.getElementById('ctc-' + tab).classList.add('active');
   if (tab === 'calendario') renderCalendar();
-  if (tab === 'banco') bkCargar();
+  if (tab === 'banco') { bkCargar(); bkGcEstado(); }
 }
 
 // Init date inputs on load
@@ -1869,6 +1885,89 @@ function bkCerrarModal() {
   document.getElementById('bk-modal').style.display = 'none';
   bkMovActual = null;
   bkSeleccion = {};
+}
+
+// ── GoCardless ──
+let bkGcBancosCargados = false;
+
+async function bkGcEstado() {
+  const el = document.getElementById('bk-gc-estado');
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/gc/estado', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const d = await r.json();
+    if (!d.configurado) {
+      el.innerHTML = '⚠ Sin configurar: faltan las claves GC_SECRET_ID / GC_SECRET_KEY en config.py del bridge.';
+      return;
+    }
+    if (!d.conexiones.length) {
+      el.innerHTML = '✅ Configurado. Ningún banco conectado todavía — elige uno y pulsa Conectar.';
+    } else {
+      el.innerHTML = d.conexiones.map(c => {
+        const ok = c.estado === 'LN';
+        return (ok ? '🟢' : '🟠') + ' <b>' + c.banco + '</b> — ' +
+               (ok ? c.cuentas + ' cuenta(s) vinculada(s)' : 'estado: ' + c.estado);
+      }).join('<br>');
+    }
+    if (!bkGcBancosCargados) bkGcCargarBancos();
+  } catch(e) {
+    el.textContent = 'No se pudo consultar el estado: ' + e.message;
+  }
+}
+
+async function bkGcCargarBancos() {
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/gc/bancos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const d = await r.json();
+    if (!d.bancos) return;
+    const sel = document.getElementById('bk-gc-banco');
+    const favoritos = d.bancos.filter(b => /bankinter|sabadell/i.test(b.nombre));
+    const resto = d.bancos.filter(b => !/bankinter|sabadell/i.test(b.nombre))
+                          .sort((x, y) => x.nombre.localeCompare(y.nombre));
+    sel.innerHTML = '<option value="">— Elige tu banco —</option>' +
+      favoritos.map(b => '<option value="' + b.id + '">⭐ ' + b.nombre + '</option>').join('') +
+      resto.map(b => '<option value="' + b.id + '">' + b.nombre + '</option>').join('');
+    bkGcBancosCargados = true;
+  } catch(e) { /* sin configurar aún */ }
+}
+
+async function bkGcConectar() {
+  const inst = document.getElementById('bk-gc-banco').value;
+  const st = document.getElementById('bk-gc-status');
+  if (!inst) { st.textContent = 'Elige un banco primero.'; return; }
+  st.textContent = 'Creando conexión...';
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/gc/conectar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ institution_id: inst })
+    });
+    const d = await r.json();
+    if (!d.ok) { st.textContent = '✗ ' + (d.error || 'Error'); return; }
+    st.textContent = 'Se ha abierto la autorización del banco en otra pestaña.';
+    window.open(d.link, '_blank');
+  } catch(e) { st.textContent = '✗ ' + e.message; }
+}
+
+async function bkGcSincronizar() {
+  const st = document.getElementById('bk-gc-status');
+  const btn = document.getElementById('bk-gc-sync');
+  btn.disabled = true; st.textContent = 'Sincronizando con el banco...';
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/gc/sincronizar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: '{}'
+    });
+    const d = await r.json();
+    if (d.ok) {
+      st.textContent = '✓ ' + d.nuevos + ' movimientos nuevos, ' + d.duplicados + ' ya existían' +
+        (d.errores && d.errores.length ? ' · ⚠ ' + d.errores.join(' | ') : '');
+      bkCargar();
+    } else {
+      st.textContent = '✗ ' + (d.error || 'Error');
+    }
+  } catch(e) { st.textContent = '✗ ' + e.message; }
+  btn.disabled = false;
 }
 </script>
 </body>
