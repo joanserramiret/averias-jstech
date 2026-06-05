@@ -2156,7 +2156,8 @@ function bkRender() {
       const catBadge = m.categoria ? ' <span style="background:#e0f2fe;color:#0e7490;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700">🏷 ' + (BK_CATS[m.categoria] || m.categoria) + '</span>' : '';
       const acciones = conc
         ? '<button onclick="bkDesconciliar(' + m.id + ')" style="padding:4px 10px;background:#fde8e8;border:1.5px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">✕ Deshacer</button>'
-        : '<button onclick="bkAbrirConciliar(' + m.id + ')" style="padding:4px 10px;background:#1a2e6e;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🔗 Conciliar</button>';
+        : '<button onclick="bkAbrirConciliar(' + m.id + ')" style="padding:4px 10px;background:#1a2e6e;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🔗 Conciliar</button>' +
+          ' <button onclick="bkCruzar(' + m.id + ')" title="Cruzar con el movimiento contrario (anticipos cobrados y devueltos, cargos anulados...)" style="padding:4px 7px;background:#f0f4fb;border:1px solid #c0cbea;border-radius:6px;font-size:11px;cursor:pointer">⇄</button>';
       return '<tr style="border-bottom:1px solid #f3f3f3">' +
         '<td style="padding:6px;white-space:nowrap">' + m.fecha + '</td>' +
         '<td style="white-space:nowrap">' + (m.banco || '—') + '</td>' +
@@ -2164,6 +2165,46 @@ function bkRender() {
         '<td style="text-align:right;font-weight:800;white-space:nowrap;color:' + (m.importe >= 0 ? '#1a7a3f' : '#c0392b') + '">' + bkFmt(m.importe) + '</td>' +
         '<td>' + badge + catBadge + '</td><td style="text-align:right">' + acciones + (conc ? '' : ' <button onclick="bkEtiquetar(' + m.id + ')" title="Asignar categoría" style="padding:4px 7px;background:#f0f4fb;border:1px solid #c0cbea;border-radius:6px;font-size:11px;cursor:pointer">🏷</button>') + '</td></tr>';
     }).join('') + '</table>';
+}
+
+// ⇄ Cruza dos movimientos opuestos que se anulan (anticipo cobrado y devuelto, cargo anulado...):
+// ambos quedan explicados el uno con el otro y salen de pendientes. Reversible con ✕ Deshacer.
+async function bkCruzar(id) {
+  const m = bkMovs.find(x => x.id === id);
+  if (!m) return;
+  const candidatos = bkMovs.filter(x => !x.conciliado && !x.categoria && x.id !== id &&
+    Math.abs(x.importe + m.importe) < 0.01);
+  if (!candidatos.length) {
+    alert('No encuentro ningún movimiento pendiente por el importe contrario (' + bkFmt(-m.importe) + ').\n' +
+      'Si está en otro filtro (categorizado/conciliado), libéralo primero.');
+    return;
+  }
+  let elegido = candidatos[0];
+  if (candidatos.length > 1) {
+    const lineas = candidatos.map((c, i) => (i + 1) + ') ' + c.fecha + ' · ' + (c.banco || '') + ' · ' +
+      (c.concepto || '').slice(0, 60) + ' · ' + bkFmt(c.importe)).join('\n');
+    const n = parseInt(prompt('Hay varios movimientos por ' + bkFmt(-m.importe) + '. ¿Con cuál cruzo?\n\n' + lineas + '\n\nEscribe el número:', '1'));
+    if (!n || n < 1 || n > candidatos.length) return;
+    elegido = candidatos[n - 1];
+  }
+  const motivo = prompt('Motivo del cruce (queda anotado para Raquel):', 'Anticipo cobrado y devuelto');
+  if (motivo === null) return;
+  if (!confirm('⇄ Cruzar estos dos movimientos:\n\n' +
+    m.fecha + ' · ' + bkFmt(m.importe) + ' · ' + (m.concepto || '').slice(0, 70) + '\n' +
+    elegido.fecha + ' · ' + bkFmt(elegido.importe) + ' · ' + (elegido.concepto || '').slice(0, 70) +
+    '\n\nAmbos quedan explicados entre sí y fuera de pendientes.')) return;
+  try {
+    for (const [a, b] of [[m, elegido], [elegido, m]]) {
+      await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ id: a.id, facturas: [{ serie: 'CRUCE', numero: String(b.id),
+          importe: Math.abs(a.importe), situacion: 'abonado',
+          cliente: motivo + ' ⇄ ' + b.fecha + ' ' + bkFmt(b.importe) }] })
+      });
+    }
+    bkCargar();
+  } catch(e) { alert('✗ ' + e.message); }
 }
 
 function bkAbrirConciliar(id) {
