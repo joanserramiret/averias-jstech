@@ -431,6 +431,7 @@
     <div class="nav-tab" onclick="switchTabC('calendario')" id="ctab-calendario">📅 Calendario</div>
     <div class="nav-tab" onclick="switchTabC('cobros')" id="ctab-cobros">💶 Cobros</div>
     <div class="nav-tab" onclick="switchTabC('banco')" id="ctab-banco">🏦 Banco</div>
+    <div class="nav-tab" onclick="switchTabC('proveedores')" id="ctab-proveedores">📁 Proveedores</div>
     <div class="nav-tab" onclick="switchTabC('iva')" id="ctab-iva">📋 IVA</div>
   </nav>
 
@@ -674,6 +675,23 @@
           </span>
         </div>
         <div id="bk-lista"><div style="color:var(--texto-suave);font-size:13px">Importa un extracto o pulsa ⟳.</div></div>
+      </div>
+    </div>
+
+    <!-- PROVEEDORES TAB -->
+    <div class="tab-content" id="ctc-proveedores">
+      <div class="card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <span>Facturas y albaranes de proveedor <span style="font-weight:400;font-size:12px;color:var(--texto-suave)">(Dropbox · CONTABLE JS-TECH / 0 PROVEÏDORS)</span></span>
+          <span style="display:flex;gap:8px;align-items:center">
+            <select id="pv-anio" onchange="pvCargar()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit"></select>
+            <input type="text" id="pv-buscar" oninput="pvRender()" placeholder="Buscar proveedor o archivo..."
+                   style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:200px"/>
+            <button onclick="pvCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
+          </span>
+        </div>
+        <div id="pv-resumen" style="font-size:12px;color:var(--texto-suave);margin-bottom:8px"></div>
+        <div id="pv-lista"><div style="color:var(--texto-suave);font-size:13px">Pulsa ⟳ para cargar.</div></div>
       </div>
     </div>
 
@@ -1659,6 +1677,7 @@ function switchTabC(tab) {
   document.getElementById('ctc-' + tab).classList.add('active');
   if (tab === 'calendario') renderCalendar();
   if (tab === 'banco') { bkCargar(); bkGcEstado(); }
+  if (tab === 'proveedores' && !pvArchivos.length) pvCargar();
 }
 
 // Init date inputs on load
@@ -1927,6 +1946,60 @@ async function bkAutoconciliar() {
         ' con varias facturas candidatas (revísalos a mano)\n· ' +
         (pendientes.length - hechos - dudosos) + ' sin pareja de importe exacto');
   bkCargar();
+}
+
+// ── PROVEEDORES (Dropbox) ──
+let pvArchivos = [];
+
+async function pvCargar() {
+  const listEl = document.getElementById('pv-lista');
+  const selAnio = document.getElementById('pv-anio');
+  const anio = selAnio.value || new Date().getFullYear();
+  listEl.innerHTML = '<div style="color:var(--texto-suave);font-size:13px"><span class="spinner"></span>Leyendo Dropbox...</div>';
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/proveedores/archivos?anio=' + anio, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const d = await r.json();
+    if (d.anios && d.anios.length && selAnio.options.length <= 1) {
+      selAnio.innerHTML = d.anios.map(a =>
+        '<option value="' + a + '"' + (String(a) === String(d.anio || anio) ? ' selected' : '') + '>' + a + '</option>').join('');
+    }
+    if (d.error && !(d.archivos || []).length) {
+      listEl.innerHTML = '<div style="color:#c0392b;font-size:13px">' + d.error + '</div>';
+      return;
+    }
+    pvArchivos = d.archivos || [];
+    pvRender();
+  } catch(e) {
+    listEl.innerHTML = '<div style="color:#c0392b;font-size:13px">Error: ' + e.message + '<br><small>¿Bridge actualizado y Dropbox accesible en ese PC?</small></div>';
+  }
+}
+
+function pvRender() {
+  const listEl = document.getElementById('pv-lista');
+  const q = (document.getElementById('pv-buscar').value || '').toLowerCase();
+  const anio = document.getElementById('pv-anio').value || new Date().getFullYear();
+  let lista = pvArchivos;
+  if (q) lista = lista.filter(a => (a.rel || '').toLowerCase().includes(q));
+  document.getElementById('pv-resumen').textContent = lista.length + ' documento(s)' + (q ? ' que coinciden' : '');
+  if (!lista.length) { listEl.innerHTML = '<div style="color:var(--texto-suave);font-size:13px">Sin documentos.</div>'; return; }
+
+  // Agrupar por mes
+  const porMes = {};
+  lista.forEach(a => { (porMes[a.mes || 'Otros'] = porMes[a.mes || 'Otros'] || []).push(a); });
+  listEl.innerHTML = Object.keys(porMes).sort().map(mes => {
+    const filas = porMes[mes].map(a => {
+      const kb = a.tam > 1048576 ? (a.tam/1048576).toFixed(1) + ' MB' : Math.round(a.tam/1024) + ' KB';
+      const url = BRIDGE_URL_C + '/proveedores/abrir?anio=' + anio + '&ruta=' + encodeURIComponent(a.rel);
+      return '<tr style="border-bottom:1px solid #f3f3f3">' +
+        '<td style="padding:5px;white-space:nowrap;color:#1a2e6e;font-weight:700">' + (a.proveedor || '—') + '</td>' +
+        '<td style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + a.nombre + '</td>' +
+        '<td style="white-space:nowrap;color:#888">' + (a.modificado || '').slice(0, 10) + '</td>' +
+        '<td style="white-space:nowrap;color:#888;text-align:right">' + kb + '</td>' +
+        '<td style="text-align:right"><a href="' + url + '" target="_blank" style="padding:3px 10px;background:#1a2e6e;color:#fff;border-radius:6px;font-size:11px;font-weight:700;text-decoration:none">👁 Ver</a></td></tr>';
+    }).join('');
+    return '<div style="font-weight:800;font-size:13px;color:#1a2e6e;margin:12px 0 4px">' + mes + ' <span style="font-weight:400;color:#888">(' + porMes[mes].length + ')</span></div>' +
+      '<table style="width:100%;border-collapse:collapse;font-size:12.5px">' + filas + '</table>';
+  }).join('');
 }
 
 function bkCerrarModal() {
