@@ -430,6 +430,7 @@
     <div class="nav-tab" onclick="switchTabC('facturas')" id="ctab-facturas">🧾 Facturas</div>
     <div class="nav-tab" onclick="switchTabC('calendario')" id="ctab-calendario">📅 Calendario</div>
     <div class="nav-tab" onclick="switchTabC('cobros')" id="ctab-cobros">💶 Cobros</div>
+    <div class="nav-tab" onclick="switchTabC('banco')" id="ctab-banco">🏦 Banco</div>
     <div class="nav-tab" onclick="switchTabC('iva')" id="ctab-iva">📋 IVA</div>
   </nav>
 
@@ -596,6 +597,62 @@
           <div class="card-title">Facturas pendientes de cobro</div>
           <div id="cobros-pendientes"><div style="color:var(--texto-suave);font-size:13px">Carga los datos primero.</div></div>
         </div>
+      </div>
+    </div>
+
+    <!-- BANCO TAB -->
+    <div class="tab-content" id="ctc-banco">
+      <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="kpi-card azul">
+          <div class="kpi-icon">📥</div>
+          <div class="kpi-label">Movimientos sin conciliar</div>
+          <div class="kpi-value" id="bk-kpi-pendientes">—</div>
+          <div class="kpi-sub" id="bk-kpi-rango"></div>
+        </div>
+        <div class="kpi-card verde">
+          <div class="kpi-icon">⬇</div>
+          <div class="kpi-label">Abonos sin conciliar</div>
+          <div class="kpi-value verde" id="bk-kpi-abonos">—</div>
+        </div>
+        <div class="kpi-card naranja">
+          <div class="kpi-icon">⬆</div>
+          <div class="kpi-label">Cargos sin conciliar</div>
+          <div class="kpi-value naranja" id="bk-kpi-cargos">—</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title">Importar extracto bancario</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <select id="bk-banco" style="padding:8px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;font-family:inherit">
+            <option>Bankinter</option>
+            <option>Sabadell</option>
+            <option value="">Otro banco</option>
+          </select>
+          <input type="file" id="bk-file" accept=".n43,.q43,.csb,.aeb,.txt,.csv" style="font-size:13px"/>
+          <button onclick="bkImportar()" id="bk-btn-importar" style="padding:8px 18px;background:#1a2e6e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">⬆ Importar</button>
+          <span id="bk-import-status" style="font-size:12px;color:var(--texto-suave)"></span>
+        </div>
+        <div style="font-size:11px;color:var(--texto-suave);margin-top:6px">
+          Formato recomendado: <b>Norma 43</b> (.n43 — Bankinter y Sabadell lo exportan desde su banca online). También CSV con columnas fecha/concepto/importe.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <span>Movimientos</span>
+          <span style="display:flex;gap:8px;align-items:center">
+            <select id="bk-filtro-estado" onchange="bkCargar()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit">
+              <option value="pendiente" selected>⏳ Pendientes</option>
+              <option value="conciliado">✅ Conciliados</option>
+              <option value="">Todos</option>
+            </select>
+            <input type="text" id="bk-buscar" oninput="bkRender()" placeholder="Buscar concepto..."
+                   style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px"/>
+            <button onclick="bkCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
+          </span>
+        </div>
+        <div id="bk-lista"><div style="color:var(--texto-suave);font-size:13px">Importa un extracto o pulsa ⟳.</div></div>
       </div>
     </div>
 
@@ -1580,6 +1637,7 @@ function switchTabC(tab) {
   document.getElementById('ctab-' + tab).classList.add('active');
   document.getElementById('ctc-' + tab).classList.add('active');
   if (tab === 'calendario') renderCalendar();
+  if (tab === 'banco') bkCargar();
 }
 
 // Init date inputs on load
@@ -1600,6 +1658,218 @@ document.addEventListener('DOMContentLoaded', () => {
 <script>
 function mostrarSplash(msg){var s=document.getElementById('splash-carga');if(!s)return;if(msg)document.getElementById('splash-carga-msg').textContent=msg;s.style.display='flex';}
 function ocultarSplash(){var s=document.getElementById('splash-carga');if(s)s.style.display='none';}
+</script>
+
+<!-- modal conciliación bancaria -->
+<div id="bk-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:600;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#fff;border-radius:14px;max-width:700px;width:100%;max-height:88vh;overflow-y:auto;padding:22px">
+    <div style="font-weight:800;font-size:16px;color:#1a2e6e">Conciliar movimiento</div>
+    <div id="bk-modal-mov" style="margin:10px 0 14px;font-size:13px;background:#f6f8fc;border-radius:8px;padding:10px 12px"></div>
+    <div style="font-size:12px;color:#888;margin-bottom:6px">Marca la factura o facturas (remesas) que cubre este movimiento. Se buscan entre los datos del período cargado.</div>
+    <input type="text" id="bk-modal-buscar" oninput="bkModalRender()" placeholder="Buscar por nº de factura o cliente..."
+           style="width:100%;padding:8px 10px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-bottom:8px"/>
+    <div id="bk-modal-lista" style="max-height:320px;overflow-y:auto;border:1px solid #eee;border-radius:8px"></div>
+    <div id="bk-modal-suma" style="margin:12px 0;font-size:14px;font-weight:800"></div>
+    <div style="display:flex;gap:10px">
+      <button onclick="bkCerrarModal()" style="flex:1;padding:11px;border-radius:8px;border:1.5px solid #dde;background:#fff;font-size:13px;font-weight:700;cursor:pointer">Cancelar</button>
+      <button onclick="bkGuardarConciliacion()" id="bk-modal-guardar" style="flex:2;padding:11px;border-radius:8px;border:none;background:#1a2e6e;color:#fff;font-size:13px;font-weight:700;cursor:pointer">✓ Conciliar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════ BANCO — extractos y conciliación ══════════
+let bkMovs = [];
+let bkMovActual = null;
+let bkSeleccion = {};   // clave "serie-numero" → {serie, numero, importe, cliente}
+
+const bkFmt = v => (v || 0).toLocaleString('es-ES', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €';
+
+async function bkImportar() {
+  const fileEl = document.getElementById('bk-file');
+  const st = document.getElementById('bk-import-status');
+  const btn = document.getElementById('bk-btn-importar');
+  if (!fileEl.files.length) { st.textContent = 'Selecciona un archivo primero.'; return; }
+  const file = fileEl.files[0];
+  btn.disabled = true; st.textContent = 'Leyendo archivo...';
+  const lector = new FileReader();
+  lector.onload = async () => {
+    try {
+      st.textContent = 'Importando...';
+      const r = await fetch(BRIDGE_URL_C + '/banco/importar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ contenido: lector.result, formato: 'auto', banco: document.getElementById('bk-banco').value })
+      });
+      const d = await r.json();
+      if (d.ok) {
+        st.textContent = '✓ ' + d.nuevos + ' nuevos, ' + d.duplicados + ' ya existían (' + d.formato.toUpperCase() + ')';
+        fileEl.value = '';
+        bkCargar();
+      } else {
+        st.textContent = '✗ ' + (d.error || 'Error');
+      }
+    } catch(e) { st.textContent = '✗ ' + e.message; }
+    btn.disabled = false;
+  };
+  lector.readAsText(file, 'ISO-8859-1');  // los N43 españoles van en latin-1
+}
+
+async function bkCargar() {
+  const estado = document.getElementById('bk-filtro-estado').value;
+  const listEl = document.getElementById('bk-lista');
+  listEl.innerHTML = '<div style="color:var(--texto-suave);font-size:13px"><span class="spinner"></span>Cargando movimientos...</div>';
+  try {
+    const [rMov, rRes] = await Promise.all([
+      fetch(BRIDGE_URL_C + '/banco/movimientos' + (estado ? '?estado=' + estado : ''), { headers: { 'ngrok-skip-browser-warning': 'true' } }),
+      fetch(BRIDGE_URL_C + '/banco/resumen', { headers: { 'ngrok-skip-browser-warning': 'true' } })
+    ]);
+    bkMovs = (await rMov.json()).movimientos || [];
+    const res = await rRes.json();
+    document.getElementById('bk-kpi-pendientes').textContent = res.pendientes ?? '—';
+    document.getElementById('bk-kpi-abonos').textContent = bkFmt(res.abonos_pendientes);
+    document.getElementById('bk-kpi-cargos').textContent = bkFmt(Math.abs(res.cargos_pendientes || 0));
+    document.getElementById('bk-kpi-rango').textContent = (res.primera_fecha && res.ultima_fecha) ? res.primera_fecha + ' → ' + res.ultima_fecha : '';
+    bkRender();
+  } catch(e) {
+    listEl.innerHTML = '<div style="color:#c0392b;font-size:13px">Error cargando movimientos: ' + e.message + '<br><small>¿Está el bridge actualizado y arrancado?</small></div>';
+  }
+}
+
+function bkRender() {
+  const listEl = document.getElementById('bk-lista');
+  const q = (document.getElementById('bk-buscar').value || '').toLowerCase();
+  let lista = bkMovs;
+  if (q) lista = lista.filter(m => (m.concepto || '').toLowerCase().includes(q) || (m.referencia || '').toLowerCase().includes(q));
+  if (!lista.length) { listEl.innerHTML = '<div style="color:var(--texto-suave);font-size:13px">Sin movimientos' + (q ? ' que coincidan.' : '.') + '</div>'; return; }
+  listEl.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12.5px">' +
+    '<tr style="text-align:left;color:#888;border-bottom:1.5px solid #eee"><th style="padding:6px">Fecha</th><th>Banco</th><th>Concepto</th><th style="text-align:right">Importe</th><th>Estado</th><th></th></tr>' +
+    lista.map(m => {
+      const conc = m.conciliado;
+      const badge = conc
+        ? '<span style="background:#e8f7ef;color:#1a7a3f;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">✅ ' + conc.map(f => f.serie + '-' + f.numero).join(', ') + '</span>'
+        : '<span style="background:#fff4e0;color:#c96a10;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">⏳ Pendiente</span>';
+      const acciones = conc
+        ? '<button onclick="bkDesconciliar(' + m.id + ')" style="padding:4px 10px;background:#fde8e8;border:1.5px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">✕ Deshacer</button>'
+        : '<button onclick="bkAbrirConciliar(' + m.id + ')" style="padding:4px 10px;background:#1a2e6e;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🔗 Conciliar</button>';
+      return '<tr style="border-bottom:1px solid #f3f3f3">' +
+        '<td style="padding:6px;white-space:nowrap">' + m.fecha + '</td>' +
+        '<td style="white-space:nowrap">' + (m.banco || '—') + '</td>' +
+        '<td style="max-width:340px">' + (m.concepto || '—') + '</td>' +
+        '<td style="text-align:right;font-weight:800;white-space:nowrap;color:' + (m.importe >= 0 ? '#1a7a3f' : '#c0392b') + '">' + bkFmt(m.importe) + '</td>' +
+        '<td>' + badge + '</td><td style="text-align:right">' + acciones + '</td></tr>';
+    }).join('') + '</table>';
+}
+
+function bkAbrirConciliar(id) {
+  bkMovActual = bkMovs.find(m => m.id === id);
+  if (!bkMovActual) return;
+  bkSeleccion = {};
+  document.getElementById('bk-modal-mov').innerHTML =
+    '<b>' + bkMovActual.fecha + '</b> · ' + (bkMovActual.banco || '') +
+    '<br>' + (bkMovActual.concepto || '—') +
+    '<br><span style="font-size:16px;font-weight:800;color:' + (bkMovActual.importe >= 0 ? '#1a7a3f' : '#c0392b') + '">' + bkFmt(bkMovActual.importe) + '</span>';
+  document.getElementById('bk-modal-buscar').value = '';
+  // Preselección: factura con importe exacto
+  const objetivo = Math.abs(bkMovActual.importe);
+  bkCandidatos().forEach(c => {
+    if (Math.abs(c.importe - objetivo) < 0.005) bkSeleccion[c.clave] = c;
+  });
+  if (Object.keys(bkSeleccion).length > 1) bkSeleccion = {};  // varias exactas: que elija el humano
+  bkModalRender();
+  document.getElementById('bk-modal').style.display = 'flex';
+}
+
+function bkCandidatos() {
+  return (typeof todasFacturasC !== 'undefined' ? todasFacturasC : [])
+    .filter(f => f._tipo === 'factura')
+    .map(f => ({
+      clave: f.Serie + '-' + f.Number,
+      serie: f.Serie, numero: f.Number,
+      fecha: (f.Date || '').slice(0, 10),
+      importe: f.Totals ? f.Totals.GrossAmount : 0,
+      cliente: f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : ''
+    }));
+}
+
+function bkModalRender() {
+  const q = (document.getElementById('bk-modal-buscar').value || '').toLowerCase();
+  let cands = bkCandidatos();
+  if (!cands.length) {
+    document.getElementById('bk-modal-lista').innerHTML =
+      '<div style="padding:14px;font-size:13px;color:#c96a10">⚠ Primero carga los datos del período en el botón "Cargar" (arriba), para tener las facturas contra las que conciliar.</div>';
+    bkSuma();
+    return;
+  }
+  if (q) cands = cands.filter(c => c.clave.toLowerCase().includes(q) || c.cliente.toLowerCase().includes(q));
+  document.getElementById('bk-modal-lista').innerHTML = cands.slice(0, 200).map(c => {
+    const sel = !!bkSeleccion[c.clave];
+    return '<label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid #f3f3f3;cursor:pointer;background:' + (sel ? '#eef4ff' : '#fff') + '">' +
+      '<input type="checkbox" ' + (sel ? 'checked' : '') + ' onchange="bkToggle(\'' + c.clave + '\')" style="width:auto"/>' +
+      '<span style="flex:1;font-size:12.5px"><b>' + c.clave + '</b> · ' + c.fecha + '<br><span style="color:#888">' + c.cliente + '</span></span>' +
+      '<span style="font-weight:800;font-size:12.5px">' + bkFmt(c.importe) + '</span></label>';
+  }).join('');
+  bkSuma();
+}
+
+function bkToggle(clave) {
+  if (bkSeleccion[clave]) delete bkSeleccion[clave];
+  else {
+    const c = bkCandidatos().find(x => x.clave === clave);
+    if (c) bkSeleccion[clave] = c;
+  }
+  bkModalRender();
+}
+
+function bkSuma() {
+  const el = document.getElementById('bk-modal-suma');
+  const seles = Object.values(bkSeleccion);
+  const suma = seles.reduce((s, c) => s + c.importe, 0);
+  const objetivo = Math.abs(bkMovActual ? bkMovActual.importe : 0);
+  const dif = suma - objetivo;
+  const cuadra = Math.abs(dif) < 0.005;
+  el.innerHTML = seles.length + ' factura(s) · Suma: ' + bkFmt(suma) + ' / Movimiento: ' + bkFmt(objetivo) +
+    (cuadra ? ' <span style="color:#1a7a3f">✓ cuadra</span>'
+            : ' <span style="color:#c96a10">(diferencia ' + bkFmt(dif) + ')</span>');
+}
+
+async function bkGuardarConciliacion() {
+  const seles = Object.values(bkSeleccion);
+  if (!seles.length) { alert('Marca al menos una factura.'); return; }
+  const objetivo = Math.abs(bkMovActual.importe);
+  const suma = seles.reduce((s, c) => s + c.importe, 0);
+  if (Math.abs(suma - objetivo) >= 0.005 &&
+      !confirm('La suma (' + bkFmt(suma) + ') no cuadra con el movimiento (' + bkFmt(objetivo) + ').\n¿Conciliar igualmente?')) return;
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: bkMovActual.id, facturas: seles.map(c => ({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente })) })
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error('No se pudo guardar');
+    bkCerrarModal();
+    bkCargar();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function bkDesconciliar(id) {
+  if (!confirm('¿Deshacer la conciliación de este movimiento?')) return;
+  try {
+    await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: id, facturas: [] })
+    });
+    bkCargar();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+function bkCerrarModal() {
+  document.getElementById('bk-modal').style.display = 'none';
+  bkMovActual = null;
+  bkSeleccion = {};
+}
 </script>
 </body>
 </html>
