@@ -1751,8 +1751,7 @@ function switchTabC(tab) {
 // Init date inputs on load
 document.addEventListener('DOMContentLoaded', () => {
   const hoy = new Date();
-  const hace30 = new Date(hoy); hace30.setDate(hoy.getDate() - 30);
-  document.getElementById('c-desde').value = hace30.toISOString().split('T')[0];
+  document.getElementById('c-desde').value = hoy.getFullYear() + '-01-01';
   document.getElementById('c-hasta').value = hoy.toISOString().split('T')[0];
   document.getElementById('login-pass').focus();
 });
