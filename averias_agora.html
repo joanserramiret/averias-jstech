@@ -4305,6 +4305,11 @@ function renderOTs() {
   const listEl = document.getElementById('ot-list');
   const q = (document.getElementById('ot-buscar').value || '').trim().toLowerCase();
   let lista = todasOTs;
+  // Técnicos: solo sus OTs y las que están sin asignar
+  if (CURRENT_USER_ROLE === 'tecnico') {
+    const yo = (CURRENT_USER_NAME || '').toLowerCase();
+    lista = lista.filter(o => !o.tecnico || (o.tecnico || '').toLowerCase() === yo);
+  }
   if (q) {
     lista = lista.filter(o =>
       (o.cliente?.nombre || '').toLowerCase().includes(q) ||
@@ -4343,6 +4348,7 @@ function renderOTs() {
           </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          ${!o.tecnico ? `<button onclick="asignarmeOT('${o.id}')" style="padding:5px 12px;background:#e87e1a;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🙋 Asignarme</button>` : ''}
           <button onclick="abrirModalEditarOT('${o.id}')" style="padding:5px 12px;background:#f0f4fb;border:1.5px solid #c0cbea;color:#1a2e6e;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">✏️ Editar</button>
           <button onclick="abrirVincularAlbaran('${o.id}')" style="padding:5px 12px;background:${o.albaran ? '#e8f7ef' : '#fff4e0'};border:1.5px solid ${o.albaran ? '#27ae60' : '#e87e1a'};color:${o.albaran ? '#1a7a3f' : '#c96a10'};border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">${o.albaran ? '🔗 ' + o.albaran.serie + '-' + o.albaran.numero : '🔗 Vincular albarán'}</button>
           <button onclick="descargarOTPDF('${o.id}')" style="padding:5px 12px;background:#5a6380;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">📄 PDF</button>
@@ -4354,6 +4360,34 @@ function renderOTs() {
       </div>
     </div>`;
   }).join('');
+}
+
+async function asignarmeOT(otId) {
+  const ot = todasOTs.find(o => o.id === otId);
+  if (!ot) return;
+  const yo = (CURRENT_USER_NAME || '').toLowerCase();
+  if (ot.tecnico && (ot.tecnico || '').toLowerCase() !== yo && CURRENT_USER_ROLE === 'tecnico') {
+    alert('Esta OT ya está asignada a ' + ot.tecnico + '. Solo un administrador puede reasignarla.');
+    return;
+  }
+  if (!confirm('¿Asignarte la ' + ot.id + '?')) return;
+  try {
+    const r = await fetch(BRIDGE_URL + '/ot/' + otId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ tecnico: CURRENT_USER_NAME })
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    await loadOTs();
+  } catch(e) { alert('Error al asignar: ' + e.message); }
+}
+
+function aplicarPermisoTecnicoOT() {
+  const inp = document.getElementById('ot-tecnico');
+  const esTec = CURRENT_USER_ROLE === 'tecnico';
+  inp.readOnly = esTec;
+  inp.style.background = esTec ? '#f3f4f6' : '';
+  inp.title = esTec ? 'Solo un administrador puede cambiar el técnico' : '';
 }
 
 // ── MODAL NUEVA / EDITAR OT ──
@@ -4369,6 +4403,7 @@ function abrirModalNuevaOT() {
   document.getElementById('ot-cliente-email').value = '';
   document.getElementById('ot-descripcion').value = '';
   document.getElementById('ot-tecnico').value = CURRENT_USER_NAME || '';
+  aplicarPermisoTecnicoOT();
   document.getElementById('ot-estado').value = 'pendiente';
   document.getElementById('ot-notas').value = '';
   document.getElementById('ot-form-error').style.display = 'none';
@@ -4388,7 +4423,8 @@ function abrirModalEditarOT(otId) {
   document.getElementById('ot-cliente-tel').value = ot.cliente?.tel || '';
   document.getElementById('ot-cliente-email').value = ot.cliente?.email || '';
   document.getElementById('ot-descripcion').value = ot.descripcion || '';
-  document.getElementById('ot-tecnico').value = ot.tecnico || '';
+  document.getElementById('ot-tecnico').value = ot.tecnico || (CURRENT_USER_ROLE === 'tecnico' ? CURRENT_USER_NAME : '') || '';
+  aplicarPermisoTecnicoOT();
   document.getElementById('ot-estado').value = ot.estado || 'pendiente';
   document.getElementById('ot-notas').value = ot.notas || '';
   document.getElementById('ot-form-error').style.display = 'none';
@@ -4450,6 +4486,17 @@ async function guardarOT() {
   const clienteNombre = document.getElementById('ot-cliente-nombre').value;
   const errEl = document.getElementById('ot-form-error');
   if (!desc) { errEl.textContent = 'La descripción es obligatoria.'; errEl.style.display='block'; return; }
+
+  // Un técnico no puede modificar OTs asignadas a otro técnico
+  if (CURRENT_USER_ROLE === 'tecnico' && editId) {
+    const otPrev = todasOTs.find(o => o.id === editId);
+    const yo = (CURRENT_USER_NAME || '').toLowerCase();
+    if (otPrev && otPrev.tecnico && (otPrev.tecnico || '').toLowerCase() !== yo) {
+      errEl.textContent = 'Esta OT está asignada a ' + otPrev.tecnico + '. Solo un administrador puede modificarla.';
+      errEl.style.display = 'block';
+      return;
+    }
+  }
 
   const body = {
     cliente_id:     document.getElementById('ot-cliente-id').value,
