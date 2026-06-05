@@ -876,6 +876,18 @@ function setPeriod(type, evt) {
 }
 
 // ===== API =====
+let diasFallidosC = [];
+
+async function agoraGetDiaC(d) {
+  const path = '/api/export/?business-day=' + d + '&filter=Invoices,DeliveryNotes&include-processed=true';
+  for (let intento = 0; intento < 3; intento++) {
+    try { return await agoraGetC(path); }
+    catch(e) { await new Promise(res => setTimeout(res, 700 * (intento + 1))); }
+  }
+  diasFallidosC.push(d);
+  return {};
+}
+
 async function agoraGetC(path) {
   const r = await fetch(BRIDGE_URL_C + path, {
     headers: { 'Authorization': AGORA_TOKEN_C, 'ngrok-skip-browser-warning': 'true' }
@@ -911,6 +923,7 @@ async function cargarDatos() {
   mostrarSplash('Cargando datos contables...');
   todasFacturasC = [];
   factPorDia = {};
+  diasFallidosC = [];
 
   const SERIES_FACTURAS = ['APPF','APPFD','F','FD','T','TD'];
   const SERIES_ALBARANES = ['A','APP'];
@@ -921,7 +934,7 @@ async function cargarDatos() {
     for (let i = 0; i < dates.length; i += BATCH_SIZE) {
       const batch = dates.slice(i, i+BATCH_SIZE);
       const results = await Promise.all(
-        batch.map(d => agoraGetC('/api/export/?business-day=' + d + '&filter=Invoices,DeliveryNotes&include-processed=true')
+        batch.map(d => agoraGetDiaC(d)
           .catch(() => { errores++; return {}; }))
       );
       results.forEach((r, idx) => {
@@ -949,7 +962,11 @@ async function cargarDatos() {
     const nFact = todasFacturasC.filter(f => f._tipo === 'factura').length;
     const nAlb = todasFacturasC.filter(f => f._tipo === 'albaran').length;
     ocultarSplash();
-    statusEl.textContent = '✓ ' + nFact + ' facturas y ' + nAlb + ' albaranes' + (errores ? ' (' + errores + ' días sin respuesta)' : '');
+    if (diasFallidosC.length) {
+      statusEl.textContent = '⚠ OJO: ' + diasFallidosC.length + ' día(s) sin respuesta tras 3 intentos (' +
+        diasFallidosC.slice(0, 5).join(', ') + (diasFallidosC.length > 5 ? '...' : '') +
+        ') — sus facturas NO están cargadas. Vuelve a pulsar Cargar.';
+    } else statusEl.textContent = '✓ ' + nFact + ' facturas y ' + nAlb + ' albaranes' + (errores ? ' (' + errores + ' días sin respuesta)' : '');
 
     btn.textContent = '🔍 Cargar datos';
 
@@ -1299,7 +1316,7 @@ async function cargarMesCalendarioSiNecesario() {
       for (let i = 0; i < dates.length; i += BATCH_SIZE) {
         const batch = dates.slice(i, i + BATCH_SIZE);
         const results = await Promise.all(
-          batch.map(d => agoraGetC('/api/export/?business-day=' + d + '&filter=Invoices,DeliveryNotes&include-processed=true').catch(() => ({})))
+          batch.map(d => agoraGetDiaC(d))
         );
         results.forEach((r, idx) => {
           const dia = batch[idx];
