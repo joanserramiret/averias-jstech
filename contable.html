@@ -694,6 +694,7 @@
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:240px"/>
             <button onclick="bkCategorizar()" id="bk-cat" title="Clasificar nóminas, impuestos, comisiones, SS y aportaciones" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🏷 Categorizar</button>
             <button onclick="bkAutoconciliar()" id="bk-auto" title="Conciliación automática: casa movimientos con facturas por importe y nombre del cliente" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">⚡ Conciliación automática</button>
+            <button onclick="bkDuplicados()" title="Detectar y quitar movimientos repetidos (entraron por N43 y por el banco a la vez)" style="padding:6px 12px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🧹 Duplicados</button>
             <button onclick="bkCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
           </span>
         </div>
@@ -2114,6 +2115,31 @@ async function bkCargar() {
   } catch(e) {
     listEl.innerHTML = '<div style="color:#c0392b;font-size:13px">Error cargando movimientos: ' + e.message + '<br><small>¿Está el bridge actualizado y arrancado?</small></div>';
   }
+}
+
+// Detecta y elimina movimientos bancarios duplicados (N43 + Enable Banking del mismo apunte)
+async function bkDuplicados() {
+  let d;
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/duplicados', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    d = await r.json();
+  } catch(e) { alert('✗ ' + e.message); return; }
+  if (!d.duplicados) { alert('✓ No hay movimientos duplicados.'); return; }
+  const muestra = (d.ejemplos || []).map(e => '· ' + e.fecha + ' · ' + e.banco + ' · ' + bkFmt(e.importe) + ' · ' + e.concepto).join('\n');
+  if (!confirm('🧹 He encontrado ' + d.duplicados + ' movimiento(s) repetido(s) (mismo banco, fecha, importe y concepto):\n\n' +
+    muestra + (d.duplicados > 10 ? '\n...' : '') +
+    '\n\nConservo el que esté conciliado/categorizado y borro el sobrante. ¿Continúo?')) return;
+  try {
+    const r2 = await fetch(BRIDGE_URL_C + '/banco/duplicados', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ ejecutar: true })
+    });
+    const r3 = await r2.json();
+    alert('🧹 ' + (r3.borrados || 0) + ' duplicado(s) eliminado(s).');
+    bkCargar();
+    bkRemesas();
+  } catch(e) { alert('✗ ' + e.message); }
 }
 
 let bkOrden = { campo: 'fecha', dir: -1 };  // ordenación actual de la tabla
