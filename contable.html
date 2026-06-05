@@ -1219,11 +1219,20 @@ async function subirCajasFaltantes() {
     return !dia.includes((f.Serie + '-' + f.Number + '.pdf').toUpperCase());
   });
 
-  if (!faltan.length) {
-    setStatusC(statusEl, '✓ CAJAS al día: todas las facturas del período (' + desde + ' → ' + hasta + ') ya están subidas', 'success');
+  // Días que necesitan resumen xls aunque sus PDFs ya estén subidos
+  const necesitanXls = [...new Set(facts.map(f => f.Date.split('T')[0]))].filter(fecha => {
+    const dia = existentes[fecha] || [];
+    return !dia.includes('__DIA_YA_SUBIDO__') && !dia.includes('__TIENE_XLS__');
+  });
+
+  if (!faltan.length && !necesitanXls.length) {
+    setStatusC(statusEl, '✓ CAJAS al día: PDFs y resúmenes xls del período (' + desde + ' → ' + hasta + ') ya están subidos', 'success');
     return;
   }
-  if (!confirm('Faltan ' + faltan.length + ' facturas en CAJAS (' + desde + ' → ' + hasta + ').\n¿Generar los PDF y subirlos ahora?')) return;
+  const msj = [];
+  if (faltan.length) msj.push(faltan.length + ' facturas en PDF');
+  if (necesitanXls.length) msj.push(necesitanXls.length + ' resúmenes Facturas.xls');
+  if (!confirm('Falta subir a CAJAS: ' + msj.join(' y ') + ' (' + desde + ' → ' + hasta + ').\n¿Generar y subir ahora?')) return;
 
   let ok = 0, errores = 0;
   for (let i = 0; i < faltan.length; i++) {
