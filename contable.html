@@ -701,6 +701,9 @@
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
           <span>🧩 Remesas y devoluciones <span style="font-weight:400;font-size:12px;color:var(--texto-suave)">(para no tener que entrar al banco)</span></span>
           <span style="display:flex;gap:8px;align-items:center">
+            <input type="file" id="rem-pdf" accept=".pdf" multiple style="display:none" onchange="remesasImportarPDF(this.files)"/>
+            <button onclick="document.getElementById('rem-pdf').click()" title="Sube el 'listado de adeudos de la remesa' del banco y desgloso recibo a recibo" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📎 Listado del banco (PDF)</button>
+            <button onclick="remesasLimpiarDesgloses()" title="Deshace los desgloses automáticos antiguos (inventados por suma de importes)" style="padding:6px 12px;background:#fde8e8;border:1.5px solid #e0b0b0;color:#c0392b;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🧹 Deshacer desgloses inventados</button>
             <button onclick="exportarRemesas()" title="Descargar el detalle en Excel" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📊 Excel</button>
             <button onclick="bkRemesas()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
           </span>
@@ -2251,13 +2254,8 @@ async function bkAutoconciliar() {
         const sol = bkBuscarDesglose(grupo, objetivo);
         if (sol && sol.length) { facturasElegidas = sol; porGrupo++; break; }
       }
-      // Última bala: remesas/recibos — SOLO facturas cobradas por recibo/domiciliación
-      // y anteriores al abono (el desglose libre sobre todo robaba facturas ajenas)
-      if (!facturasElegidas && m.importe > 0 && /REM\.|REMESA|RECIBOS|ADEUDOS/i.test(m.concepto || '')) {
-        const pool = libres.filter(c => c.recibo && (!c.fecha || !m.fecha || c.fecha <= m.fecha));
-        const sol = bkBuscarDesglose(pool, objetivo);
-        if (sol && sol.length >= 2) { facturasElegidas = sol; remesas++; }
-      }
+      // Las remesas NO se adivinan por combinación de importes (inventaba desgloses falsos
+      // que secuestraban facturas) — se desglosan con el listado real del banco: pestaña 🧩 Remesas → 📎 PDF
     }
     if (facturasElegidas) {
       try {
@@ -2321,9 +2319,16 @@ async function bkRemesas() {
         : '<span style="color:#c0392b;font-weight:700">⏳ sin desglosar</span>';
       const detalle = facts.length
         ? '<table style="width:100%;font-size:12px;margin-top:6px"><tr style="color:var(--texto-suave)"><th style="text-align:left">Factura</th><th style="text-align:left">Cliente</th><th style="text-align:right">Importe</th></tr>' +
-          facts.map(f => '<tr><td><b>' + f.serie + '-' + f.numero + '</b></td><td>' + (f.cliente || '—') +
-            '</td><td style="text-align:right">' + bkFmt(f.importe) + '</td></tr>').join('') + '</table>'
-        : '<div style="font-size:12px;color:var(--texto-suave);margin-top:6px">Aún sin facturas asociadas — pasa el ⚡ Autoconciliar o desglósala desde el movimiento.</div>';
+          facts.map(f => {
+            const dev = f.situacion === 'devuelto';
+            const fra = f.serie === '—' ? '<i style="color:#c96a10">sin factura localizada</i>'
+                      : f.serie === 'REF' ? '<b>' + f.numero + '</b>'
+                      : '<b>' + f.serie + '-' + f.numero + '</b>';
+            return '<tr' + (dev ? ' style="color:#c0392b;font-weight:700"' : '') + '><td>' + fra + '</td><td>' +
+              (f.cliente || '—') + (dev ? ' ↩ DEVUELTO' : '') +
+              '</td><td style="text-align:right">' + bkFmt(f.importe) + '</td></tr>';
+          }).join('') + '</table>'
+        : '<div style="font-size:12px;color:var(--texto-suave);margin-top:6px">Sin desglosar — súbeme el listado del banco con 📎 (PDF de Bankinter o TXT del Sabadell).</div>';
       return '<details style="border:1px solid #e4e8f3;border-radius:8px;padding:8px 12px;margin-bottom:6px">' +
         '<summary style="cursor:pointer;display:flex;gap:10px;align-items:center;font-size:12.5px;flex-wrap:wrap">' +
         '<b>' + (m.fecha || '—') + '</b><span style="color:var(--texto-suave)">' + (m.banco || '') + '</span>' +
@@ -2368,6 +2373,109 @@ function exportarRemesas() {
   a.download = 'remesas_jstech_' + new Date().toISOString().split('T')[0] + '.csv';
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Importa ficheros de remesa del banco (PDF Bankinter / TXT SEPA Sabadell) y desglosa con datos REALES
+async function remesasImportarPDF(files) {
+  if (!files || !files.length) return;
+  let movs = [];
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    movs = (await r.json()).movimientos || [];
+  } catch(e) { alert('Error consultando el banco: ' + e.message); return; }
+  const cands = bkCandidatos({ importe: 1 });  // facturas de venta cargadas (si las hay)
+  const resumen = [];
+  for (const file of files) {
+    let d;
+    try {
+      const r = await fetch(BRIDGE_URL_C + '/remesas/parse_pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ pdf_base64: await blobABase64C(file) })
+      });
+      d = await r.json();
+    } catch(e) { resumen.push('✗ ' + file.name + ': ' + e.message); continue; }
+    if (!d.ok) { resumen.push('✗ ' + file.name + ': ' + d.error); continue; }
+
+    // Localizar el abono en el banco: mismo importe y fecha cercana (±4 días)
+    const mov = movs.find(m => m.importe > 0 && Math.abs(m.importe - d.importe) < 0.01 &&
+      (!d.fecha_abono || !m.fecha || Math.abs(new Date(m.fecha) - new Date(d.fecha_abono)) <= 4 * 86400000));
+    if (!mov) { resumen.push('✗ ' + file.name + ': no veo el abono de ' + bkFmt(d.importe) + ' (' + (d.fecha_abono || '¿fecha?') + ') en los movimientos — sincroniza ese período del banco'); continue; }
+
+    const usadasLoc = new Set();
+    const entradas = [];
+    let conFactura = 0, devueltos = 0;
+    d.recibos.forEach(rec => {
+      if (rec.situacion === 'devuelto') devueltos++;
+      // 1) El fichero trae las facturas exactas (Sabadell)
+      if (rec.facturas && rec.facturas.length) {
+        const halladas = rec.facturas.map(ref => cands.find(x => x.clave === ref)).filter(Boolean);
+        if (halladas.length === rec.facturas.length) {
+          halladas.forEach(c => { usadasLoc.add(c.clave); entradas.push({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: rec.deudor, situacion: rec.situacion }); });
+          conFactura++;
+          return;
+        }
+        // referencias sin cargar: guardamos la referencia igualmente
+        entradas.push({ serie: 'REF', numero: rec.facturas.join(' '), importe: rec.importe, cliente: rec.deudor, situacion: rec.situacion });
+        conFactura++;
+        return;
+      }
+      // 2) Por nombre + importe exacto (Bankinter no trae números de factura)
+      const m1 = cands.filter(c => !usadasLoc.has(c.clave) && Math.abs(c.importe - rec.importe) < 0.01 &&
+        (bkNombreEnConcepto(c.cliente, rec.deudor) || bkNombreEnConcepto(rec.deudor, c.cliente)));
+      if (m1.length === 1) {
+        usadasLoc.add(m1[0].clave);
+        entradas.push({ serie: m1[0].serie, numero: m1[0].numero, importe: rec.importe, cliente: rec.deudor, situacion: rec.situacion });
+        conFactura++;
+      } else {
+        entradas.push({ serie: '—', numero: '', importe: rec.importe, cliente: rec.deudor, situacion: rec.situacion });
+      }
+    });
+
+    try {
+      const r2 = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ id: mov.id, facturas: entradas })
+      });
+      if ((await r2.json()).ok) {
+        resumen.push('✓ ' + file.name + ': remesa de ' + bkFmt(d.importe) + ' → ' + d.recibos.length + ' recibos (' +
+          conFactura + ' con factura' + (devueltos ? ', ' + devueltos + ' DEVUELTOS' : '') + ')');
+      } else resumen.push('✗ ' + file.name + ': error guardando la conciliación');
+    } catch(e) { resumen.push('✗ ' + file.name + ': ' + e.message); }
+  }
+  document.getElementById('rem-pdf').value = '';
+  alert('📎 Importación de remesas:\n\n' + resumen.join('\n') +
+    '\n\nConsejo: carga antes las facturas del período en la pestaña Facturas para que case recibos con facturas.');
+  bkRemesas();
+}
+
+// Deshace los desgloses inventados por el antiguo autoconciliar (combinaciones por suma).
+// Los importados de fichero del banco llevan marca de situación y NO se tocan.
+async function remesasLimpiarDesgloses() {
+  let movs = [];
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    movs = (await r.json()).movimientos || [];
+  } catch(e) { alert('Error: ' + e.message); return; }
+  const sospechosos = movs.filter(m => m.conciliado && m.conciliado.length >= 2 && !m.conciliado.some(f => f.situacion));
+  if (!sospechosos.length) { alert('✓ No hay desgloses automáticos antiguos que limpiar.'); return; }
+  if (!confirm('Voy a deshacer ' + sospechosos.length + ' desglose(s) automático(s) antiguo(s) (varias facturas sin respaldo del banco).\n' +
+    'Los movimientos vuelven a "pendientes" y sus facturas quedan libres — no se borra nada.\n' +
+    'OJO: si desglosaste alguno A MANO con varias facturas, también se deshará.\n\n¿Continuar?')) return;
+  let ok = 0;
+  for (const m of sospechosos) {
+    try {
+      const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ id: m.id, facturas: [] })
+      });
+      if ((await r.json()).ok) ok++;
+    } catch(e) { /* seguir */ }
+  }
+  alert('🧹 ' + ok + ' desglose(s) deshecho(s). Ahora importa los listados reales con 📎 y pasa el ⚡ para el resto.');
+  bkRemesas();
 }
 
 // ── PROVEEDORES (Dropbox) ──
