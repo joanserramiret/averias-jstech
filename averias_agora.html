@@ -922,8 +922,9 @@
     <div class="row" style="gap:10px;margin-bottom:12px">
       <div class="field" style="flex:1">
         <label style="font-size:11px;font-weight:700;color:#1a2e6e;text-transform:uppercase;letter-spacing:.5px">Técnico</label>
-        <input type="text" id="ot-tecnico" placeholder="Nombre técnico"
+        <input type="text" id="ot-tecnico" list="lista-tecnicos" placeholder="Nombre técnico"
           style="width:100%;padding:9px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-top:4px"/>
+        <datalist id="lista-tecnicos"></datalist>
         <label id="ot-tecnico-self" style="display:none;align-items:center;gap:6px;font-size:12px;color:#555;margin-top:6px;cursor:pointer">
           <input type="checkbox" id="ot-tecnico-self-chk" onchange="toggleAsignarmeOT()" style="width:auto"/> Asignármela a mí
         </label>
@@ -4400,14 +4401,32 @@ function renderOTs() {
   }).join('');
 }
 
+function obtenerTecnicos() {
+  // Fuente principal: usuarios de Ágora con perfil que NO sea administrador
+  const set = new Set();
+  (typeof todosUsuarios !== 'undefined' ? todosUsuarios : []).forEach(u => {
+    if (!u || u.DeletionDate) return;
+    const perfil = ((u.Profile || '') + '').toLowerCase();
+    if (perfil && perfil.indexOf('admin') === -1) set.add((u.Name || '').trim());
+  });
+  // Y además, cualquier nombre que ya figure en OTs (por si es histórico)
+  todasOTs.forEach(o => { if (o.tecnico) set.add((o.tecnico || '').trim()); });
+  set.delete('');
+  return [...set].sort();
+}
+
 function poblarFiltroTecnicos() {
+  const tecnicos = obtenerTecnicos();
+  // Autocompletado del campo técnico del modal
+  const dl = document.getElementById('lista-tecnicos');
+  if (dl) dl.innerHTML = tecnicos.map(t => `<option value="${t.replace(/"/g,'&quot;')}">`).join('');
+
   const sel = document.getElementById('ot-filtro-tecnico');
   if (!sel) return;
   // Los técnicos no necesitan este filtro (ya ven solo lo suyo)
   if (CURRENT_USER_ROLE === 'tecnico') { sel.style.display = 'none'; return; }
   sel.style.display = '';
   const actual = sel.value;
-  const tecnicos = [...new Set(todasOTs.map(o => (o.tecnico || '').trim()).filter(Boolean))].sort();
   sel.innerHTML = '<option value="">Todos los técnicos</option>' +
                   '<option value="__sin__">⚪ Sin asignar</option>' +
                   tecnicos.map(t => `<option value="${t.replace(/"/g,'&quot;')}">👤 ${t}</option>`).join('');
