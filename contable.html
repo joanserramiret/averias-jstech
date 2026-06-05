@@ -431,6 +431,7 @@
     <div class="nav-tab" onclick="switchTabC('calendario')" id="ctab-calendario">📅 Calendario</div>
     <div class="nav-tab" onclick="switchTabC('cobros')" id="ctab-cobros">💶 Cobros</div>
     <div class="nav-tab" onclick="switchTabC('banco')" id="ctab-banco">🏦 Banco</div>
+    <div class="nav-tab" onclick="switchTabC('remesas')" id="ctab-remesas">🧩 Remesas</div>
     <div class="nav-tab" onclick="switchTabC('proveedores')" id="ctab-proveedores">📁 Proveedores</div>
     <div class="nav-tab" onclick="switchTabC('iva')" id="ctab-iva">📋 IVA</div>
   </nav>
@@ -668,17 +669,6 @@
         </div>
       </div>
 
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-          <span>🧩 Remesas y devoluciones <span style="font-weight:400;font-size:12px;color:var(--texto-suave)">(para no tener que entrar al banco)</span></span>
-          <span style="display:flex;gap:8px;align-items:center">
-            <button onclick="exportarRemesas()" title="Descargar el detalle en Excel" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📊 Excel</button>
-            <button onclick="bkRemesas()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
-          </span>
-        </div>
-        <div id="bk-remesas"><div style="color:var(--texto-suave);font-size:13px">Pulsa ⟳ para cargar las remesas.</div></div>
-      </div>
-
       <div class="card">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
           <span>Movimientos</span>
@@ -702,6 +692,20 @@
           </span>
         </div>
         <div id="bk-lista"><div style="color:var(--texto-suave);font-size:13px">Importa un extracto o pulsa ⟳.</div></div>
+      </div>
+    </div>
+
+    <!-- REMESAS TAB -->
+    <div class="tab-content" id="ctc-remesas">
+      <div class="card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <span>🧩 Remesas y devoluciones <span style="font-weight:400;font-size:12px;color:var(--texto-suave)">(para no tener que entrar al banco)</span></span>
+          <span style="display:flex;gap:8px;align-items:center">
+            <button onclick="exportarRemesas()" title="Descargar el detalle en Excel" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📊 Excel</button>
+            <button onclick="bkRemesas()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
+          </span>
+        </div>
+        <div id="bk-remesas"><div style="color:var(--texto-suave);font-size:13px">Cargando remesas...</div></div>
       </div>
     </div>
 
@@ -1841,7 +1845,8 @@ function switchTabC(tab) {
   document.getElementById('ctab-' + tab).classList.add('active');
   document.getElementById('ctc-' + tab).classList.add('active');
   if (tab === 'calendario') renderCalendar();
-  if (tab === 'banco') { bkCargar(); bkGcEstado(); bkRemesas(); }
+  if (tab === 'banco') { bkCargar(); bkGcEstado(); }
+  if (tab === 'remesas') bkRemesas();
   if (tab === 'proveedores' && !pvArchivos.length) pvCargar();
 }
 
@@ -2639,10 +2644,15 @@ async function cargarSaldos() {
     const r = await fetch(BRIDGE_URL_C + '/banco/eb/saldos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
     const d = await r.json();
     if (!d.saldos || !d.saldos.length) { el.textContent = d.error || 'Sin cuentas bancarias vinculadas.'; return; }
-    el.innerHTML = d.saldos.map(s => s.saldo === null
-      ? '<span><b style="color:#1a2e6e">' + s.banco + '</b> · <span style="color:#c0392b;font-size:12px">' + (s.error || 'error') + '</span></span>'
-      : '<span><b style="color:#1a2e6e">' + s.banco + '</b> ·' + s.iban + ' → <b style="font-size:17px;color:' + (s.saldo >= 0 ? '#1a7a3f' : '#c0392b') + '">' + bkFmt(s.saldo) + '</b></span>'
-    ).join('');
+    el.innerHTML = d.saldos.map(s => {
+      if (s.saldo === null)
+        return '<span><b style="color:#1a2e6e">' + s.banco + '</b> · <span style="color:#c0392b;font-size:12px">' + (s.error || 'error') + '</span></span>';
+      const sello = s.actualizado
+        ? ' <span style="font-size:11px;color:var(--texto-suave)" title="Último dato bueno del banco">' +
+          s.actualizado.replace('T', ' ') + (s.cacheado ? ' ⏱' : '') + '</span>'
+        : '';
+      return '<span><b style="color:#1a2e6e">' + s.banco + '</b> ·' + s.iban + ' → <b style="font-size:17px;color:' + (s.saldo >= 0 ? '#1a7a3f' : '#c0392b') + '">' + bkFmt(s.saldo) + '</b>' + sello + '</span>';
+    }).join('');
   } catch(e) { el.textContent = 'No se pudieron cargar los saldos: ' + e.message; }
 }
 
