@@ -2916,12 +2916,15 @@ async function pvCargar() {
 let pvDatos = {};   // ruta → {total, fecha, estado, proveedor, nombre}
 
 async function pvCargarDatos(anio) {
-  try {
-    const r = await fetch(BRIDGE_URL_C + '/proveedores/datos?anio=' + anio, { headers: { 'ngrok-skip-browser-warning': 'true' } });
-    const d = await r.json();
-    pvDatos = {};
-    (d.facturas || []).forEach(f => { pvDatos[f.ruta] = f; });
-  } catch(e) { pvDatos = {}; }
+  // Carga el año pedido Y el anterior: los pagos a 30/60 días (Depau y cía.) cruzan el año
+  // — un cargo de enero 2026 suele pagar facturas de noviembre/diciembre 2025
+  pvDatos = {};
+  for (const a of [parseInt(anio) - 1, parseInt(anio)]) {
+    try {
+      const r = await fetch(BRIDGE_URL_C + '/proveedores/datos?anio=' + a, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+      ((await r.json()).facturas || []).forEach(f => { pvDatos[f.ruta] = f; });
+    } catch(e) { /* año sin datos: seguir */ }
+  }
 }
 
 async function pvEscanear() {
