@@ -687,6 +687,12 @@
           <span>Facturas y albaranes de proveedor <span style="font-weight:400;font-size:12px;color:var(--texto-suave)">(Dropbox · CONTABLE JS-TECH / 0 PROVEÏDORS)</span></span>
           <span style="display:flex;gap:8px;align-items:center">
             <select id="pv-anio" onchange="pvCargar()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit"></select>
+            <select id="pv-filtro" onchange="pvRender()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit">
+              <option value="">Todos</option>
+              <option value="revisar">⚠ Para revisar</option>
+              <option value="ok">✓ Con importe</option>
+              <option value="duplicado">🧹 Duplicados</option>
+            </select>
             <input type="text" id="pv-buscar" oninput="pvRender()" placeholder="Buscar proveedor o archivo..."
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:200px"/>
             <button onclick="pvCorreo()" id="pv-correo" title="Buscar facturas PDF en el correo (Outlook + Webempresa) y dejarlas en el cajón IA" style="padding:6px 12px;background:#1a7a3f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📧 Facturas del correo</button>
@@ -2090,7 +2096,12 @@ async function pvEscanear() {
 
 async function pvCorreo() {
   const btn = document.getElementById('pv-correo');
-  const desde = prompt('¿Desde qué fecha busco facturas en el correo? (AAAA-MM-DD)', '2026-01-01');
+  let sugerido = '2026-01-01';
+  try {
+    const rE = await fetch(BRIDGE_URL_C + '/correo/estado', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    sugerido = (await rE.json()).sugerido || sugerido;
+  } catch(e) { /* primera vez */ }
+  const desde = prompt('¿Desde qué fecha busco facturas en el correo? (AAAA-MM-DD)\n(sugerida: justo después del último barrido)', sugerido);
   if (!desde) return;
   btn.disabled = true; btn.textContent = '📧 Buscando...';
   try {
@@ -2202,8 +2213,18 @@ function pvRender() {
   const listEl = document.getElementById('pv-lista');
   const q = (document.getElementById('pv-buscar').value || '').toLowerCase();
   const anio = document.getElementById('pv-anio').value || new Date().getFullYear();
+  const filtro = document.getElementById('pv-filtro').value;
   let lista = pvArchivos;
   if (q) lista = lista.filter(a => (a.rel || '').toLowerCase().includes(q));
+  if (filtro) {
+    lista = lista.filter(a => {
+      const est = (pvDatos[anio + '/' + a.rel] || {}).estado;
+      if (filtro === 'revisar')    return !est || ['dudoso', 'sin_texto', 'error'].includes(est);
+      if (filtro === 'ok')         return ['ok', 'corregido', 'ocr'].includes(est);
+      if (filtro === 'duplicado')  return est === 'duplicado';
+      return true;
+    });
+  }
   document.getElementById('pv-resumen').textContent = lista.length + ' documento(s)' + (q ? ' que coinciden' : '');
   if (!lista.length) { listEl.innerHTML = '<div style="color:var(--texto-suave);font-size:13px">Sin documentos.</div>'; return; }
 
