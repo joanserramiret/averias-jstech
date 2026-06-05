@@ -1834,6 +1834,8 @@ async function bkCargar() {
   const listEl = document.getElementById('bk-lista');
   listEl.innerHTML = '<div style="color:var(--texto-suave);font-size:13px"><span class="spinner"></span>Cargando movimientos...</div>';
   try {
+    // Autocategorizar siempre antes de listar (nóminas, impuestos, comisiones... — es local y barato)
+    try { await fetch(BRIDGE_URL_C + '/banco/categorizar', { method: 'POST', headers: { 'ngrok-skip-browser-warning': 'true' } }); } catch(e) {}
     const [rMov, rRes] = await Promise.all([
       fetch(BRIDGE_URL_C + '/banco/movimientos?estado=' + estado + (categoria ? '&categoria=' + categoria : ''), { headers: { 'ngrok-skip-browser-warning': 'true' } }),
       fetch(BRIDGE_URL_C + '/banco/resumen', { headers: { 'ngrok-skip-browser-warning': 'true' } })
