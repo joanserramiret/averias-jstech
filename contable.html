@@ -688,6 +688,7 @@
             <select id="pv-anio" onchange="pvCargar()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit"></select>
             <input type="text" id="pv-buscar" oninput="pvRender()" placeholder="Buscar proveedor o archivo..."
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:200px"/>
+            <button onclick="pvEscanear()" id="pv-escanear" title="Extraer importes y fechas de los PDF" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🔍 Escanear importes</button>
             <button onclick="pvCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
           </span>
         </div>
@@ -1771,6 +1772,7 @@ async function bkCargar() {
     document.getElementById('bk-kpi-abonos').textContent = bkFmt(res.abonos_pendientes);
     document.getElementById('bk-kpi-cargos').textContent = bkFmt(Math.abs(res.cargos_pendientes || 0));
     document.getElementById('bk-kpi-rango').textContent = (res.primera_fecha && res.ultima_fecha) ? res.primera_fecha + ' → ' + res.ultima_fecha : '';
+    if (!Object.keys(pvDatos).length) pvCargarDatos(new Date().getFullYear());
     bkRender();
   } catch(e) {
     listEl.innerHTML = '<div style="color:#c0392b;font-size:13px">Error cargando movimientos: ' + e.message + '<br><small>¿Está el bridge actualizado y arrancado?</small></div>';
@@ -1813,7 +1815,7 @@ function bkAbrirConciliar(id) {
   document.getElementById('bk-modal-buscar').value = '';
   // Preselección: factura con importe exacto
   const objetivo = Math.abs(bkMovActual.importe);
-  bkCandidatos().forEach(c => {
+  bkCandidatos(bkMovActual).forEach(c => {
     if (Math.abs(c.importe - objetivo) < 0.005) bkSeleccion[c.clave] = c;
   });
   if (Object.keys(bkSeleccion).length > 1) bkSeleccion = {};  // varias exactas: que elija el humano
@@ -1821,7 +1823,20 @@ function bkAbrirConciliar(id) {
   document.getElementById('bk-modal').style.display = 'flex';
 }
 
-function bkCandidatos() {
+function bkCandidatos(mov) {
+  // Cargos (importe negativo) → facturas de PROVEEDOR extraídas del Dropbox
+  if (mov && mov.importe < 0) {
+    return Object.values(pvDatos)
+      .filter(f => f.total > 0 && (f.estado === 'ok' || f.estado === 'corregido'))
+      .map(f => ({
+        clave: 'PROV:' + f.ruta,
+        serie: 'PROV', numero: f.nombre,
+        fecha: f.fecha || '',
+        importe: f.total,
+        cliente: f.proveedor || ''
+      }));
+  }
+  // Abonos → facturas de venta de Ágora
   return (typeof todasFacturasC !== 'undefined' ? todasFacturasC : [])
     .filter(f => f._tipo === 'factura')
     .map(f => ({
@@ -1835,10 +1850,13 @@ function bkCandidatos() {
 
 function bkModalRender() {
   const q = (document.getElementById('bk-modal-buscar').value || '').toLowerCase();
-  let cands = bkCandidatos();
+  let cands = bkCandidatos(bkMovActual);
   if (!cands.length) {
+    const msj = (bkMovActual && bkMovActual.importe < 0)
+      ? '⚠ No hay facturas de proveedor escaneadas. Ve a la pestaña 📁 Proveedores y pulsa "🔍 Escanear importes".'
+      : '⚠ Primero carga los datos del período en el botón "Cargar" (arriba), para tener las facturas contra las que conciliar.';
     document.getElementById('bk-modal-lista').innerHTML =
-      '<div style="padding:14px;font-size:13px;color:#c96a10">⚠ Primero carga los datos del período en el botón "Cargar" (arriba), para tener las facturas contra las que conciliar.</div>';
+      '<div style="padding:14px;font-size:13px;color:#c96a10">' + msj + '</div>';
     bkSuma();
     return;
   }
@@ -1856,7 +1874,7 @@ function bkModalRender() {
 function bkToggle(clave) {
   if (bkSeleccion[clave]) delete bkSeleccion[clave];
   else {
-    const c = bkCandidatos().find(x => x.clave === clave);
+    const c = bkCandidatos(bkMovActual).find(x => x.clave === clave);
     if (c) bkSeleccion[clave] = c;
   }
   bkModalRender();
@@ -1908,8 +1926,7 @@ async function bkDesconciliar(id) {
 
 async function bkAutoconciliar() {
   const btn = document.getElementById('bk-auto');
-  const cands = bkCandidatos();
-  if (!cands.length) { alert('Primero carga los datos del período (botón Cargar) para tener las facturas.'); return; }
+  // Fuentes: facturas de Ágora (abonos) y de proveedor (cargos) — cada movimiento usa la suya
 
   // Facturas ya usadas en alguna conciliación (de cualquier movimiento)
   let usadas = new Set();
@@ -1920,14 +1937,15 @@ async function bkAutoconciliar() {
     });
   } catch(e) { alert('Error consultando movimientos: ' + e.message); return; }
 
-  const pendientes = bkMovs.filter(m => !m.conciliado && m.importe > 0);
-  if (!pendientes.length) { alert('No hay abonos pendientes de conciliar en la vista actual.'); return; }
+  const pendientes = bkMovs.filter(m => !m.conciliado);
+  if (!pendientes.length) { alert('No hay movimientos pendientes de conciliar en la vista actual.'); return; }
 
   btn.disabled = true;
   let hechos = 0, dudosos = 0;
   for (const m of pendientes) {
     const objetivo = Math.abs(m.importe);
-    const matches = cands.filter(c => !usadas.has(c.clave) && Math.abs(c.importe - objetivo) < 0.005);
+    const candsMov = bkCandidatos(m);
+    const matches = candsMov.filter(c => !usadas.has(c.clave) && Math.abs(c.importe - objetivo) < 0.005);
     if (matches.length === 1) {
       const c = matches[0];
       try {
@@ -1969,10 +1987,64 @@ async function pvCargar() {
       return;
     }
     pvArchivos = d.archivos || [];
+    await pvCargarDatos(d.anio || anio);
     pvRender();
   } catch(e) {
     listEl.innerHTML = '<div style="color:#c0392b;font-size:13px">Error: ' + e.message + '<br><small>¿Bridge actualizado y Dropbox accesible en ese PC?</small></div>';
   }
+}
+
+let pvDatos = {};   // ruta → {total, fecha, estado, proveedor, nombre}
+
+async function pvCargarDatos(anio) {
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/proveedores/datos?anio=' + anio, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const d = await r.json();
+    pvDatos = {};
+    (d.facturas || []).forEach(f => { pvDatos[f.ruta] = f; });
+  } catch(e) { pvDatos = {}; }
+}
+
+async function pvEscanear() {
+  const btn = document.getElementById('pv-escanear');
+  const anio = document.getElementById('pv-anio').value || new Date().getFullYear();
+  btn.disabled = true; btn.textContent = '🔍 Escaneando...';
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/proveedores/escanear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ anio: anio })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      alert('🔍 Escaneo completado:\n· ' + d.extraidos + ' con importe extraído\n· ' + d.dudosos +
+            ' dudosos (sin total claro)\n· ' + d.sin_texto + ' escaneados sin texto (corrígelos a mano o pásalos por OCR)' +
+            (d.saltados ? '\n· ' + d.saltados + ' corregidos a mano (intactos)' : ''));
+      await pvCargarDatos(anio);
+      pvRender();
+    } else {
+      alert('✗ ' + (d.error || 'Error'));
+    }
+  } catch(e) { alert('✗ ' + e.message); }
+  btn.disabled = false; btn.textContent = '🔍 Escanear importes';
+}
+
+async function pvCorregir(ruta) {
+  const f = pvDatos[ruta] || {};
+  const val = prompt('Importe total de la factura (€):', f.total || '');
+  if (val === null) return;
+  const total = parseFloat(String(val).replace(',', '.'));
+  if (isNaN(total)) { alert('Importe no válido'); return; }
+  try {
+    await fetch(BRIDGE_URL_C + '/proveedores/corregir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ ruta: ruta, total: total })
+    });
+    const anio = document.getElementById('pv-anio').value || new Date().getFullYear();
+    await pvCargarDatos(anio);
+    pvRender();
+  } catch(e) { alert('Error: ' + e.message); }
 }
 
 function pvRender() {
@@ -1991,10 +2063,19 @@ function pvRender() {
     const filas = porMes[mes].map(a => {
       const kb = a.tam > 1048576 ? (a.tam/1048576).toFixed(1) + ' MB' : Math.round(a.tam/1024) + ' KB';
       const url = BRIDGE_URL_C + '/proveedores/abrir?anio=' + anio + '&ruta=' + encodeURIComponent(a.rel);
+      const ruta = anio + '/' + a.rel;
+      const dat = pvDatos[ruta] || {};
+      const est = dat.estado;
+      const chip = est === 'ok' || est === 'corregido'
+        ? '<span style="color:#1a7a3f;font-weight:800">' + bkFmt(dat.total) + (est === 'corregido' ? ' ✎' : '') + '</span>'
+        : est === 'sin_texto'
+          ? '<span style="color:#c0392b;font-size:11px">📷 escaneo</span>'
+          : est ? '<span style="color:#c96a10;font-size:11px">¿?</span>' : '';
       return '<tr style="border-bottom:1px solid #f3f3f3">' +
         '<td style="padding:5px;white-space:nowrap;color:#1a2e6e;font-weight:700">' + (a.proveedor || '—') + '</td>' +
-        '<td style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + a.nombre + '</td>' +
-        '<td style="white-space:nowrap;color:#888">' + (a.modificado || '').slice(0, 10) + '</td>' +
+        '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + a.nombre + '</td>' +
+        '<td style="white-space:nowrap;color:#888">' + (dat.fecha || (a.modificado || '').slice(0, 10)) + '</td>' +
+        '<td style="white-space:nowrap;text-align:right" onclick="pvCorregir(\'' + ruta.replace(/'/g, "\\'") + '\')" title="Clic para corregir el importe">' + (chip || '<span style="color:#bbb;font-size:11px">sin escanear</span>') + '</td>' +
         '<td style="white-space:nowrap;color:#888;text-align:right">' + kb + '</td>' +
         '<td style="text-align:right"><a href="' + url + '" target="_blank" style="padding:3px 10px;background:#1a2e6e;color:#fff;border-radius:6px;font-size:11px;font-weight:700;text-decoration:none">👁 Ver</a></td></tr>';
     }).join('');
