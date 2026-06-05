@@ -427,13 +427,13 @@
 
   <nav>
     <div class="nav-tab active" onclick="switchTabC('dashboard')" id="ctab-dashboard">📊 Resumen</div>
-    <div class="nav-tab" onclick="switchTabC('facturas')" id="ctab-facturas">🧾 Facturas</div>
+    <div class="nav-tab" onclick="switchTabC('facturas')" id="ctab-facturas">🧾 Facturas emitidas</div>
+    <div class="nav-tab" onclick="switchTabC('cobros')" id="ctab-cobros">💶 Cartera de cobros</div>
     <div class="nav-tab" onclick="switchTabC('calendario')" id="ctab-calendario">📅 Calendario</div>
-    <div class="nav-tab" onclick="switchTabC('cobros')" id="ctab-cobros">💶 Cobros</div>
-    <div class="nav-tab" onclick="switchTabC('banco')" id="ctab-banco">🏦 Banco</div>
-    <div class="nav-tab" onclick="switchTabC('remesas')" id="ctab-remesas">🧩 Remesas</div>
-    <div class="nav-tab" onclick="switchTabC('proveedores')" id="ctab-proveedores">📁 Proveedores</div>
-    <div class="nav-tab" onclick="switchTabC('iva')" id="ctab-iva">📋 IVA</div>
+    <div class="nav-tab" onclick="switchTabC('proveedores')" id="ctab-proveedores">📥 Facturas recibidas</div>
+    <div class="nav-tab" onclick="switchTabC('banco')" id="ctab-banco">🏦 Tesorería</div>
+    <div class="nav-tab" onclick="switchTabC('remesas')" id="ctab-remesas">🧩 Remesas y efectos</div>
+    <div class="nav-tab" onclick="switchTabC('iva')" id="ctab-iva">📋 Impuestos · IVA</div>
   </nav>
 
   <main>
@@ -631,7 +631,7 @@
       <div id="bk-categorias" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px"></div>
 
       <div class="card" style="margin-bottom:16px">
-        <div class="card-title">Importar extracto bancario</div>
+        <div class="card-title">Importar extracto bancario (Norma 43 / CSV)</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
           <select id="bk-banco" style="padding:8px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;font-family:inherit">
             <option>Bankinter</option>
@@ -671,7 +671,7 @@
 
       <div class="card">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-          <span>Movimientos</span>
+          <span>Movimientos bancarios · conciliación</span>
           <span style="display:flex;gap:8px;align-items:center">
             <select id="bk-filtro-estado" onchange="bkCargar()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit">
               <option value="pendiente" selected>⏳ Pendientes</option>
@@ -682,12 +682,13 @@
               <option value="cat:seg_social">🧾 Seg. Social / Autónomos</option>
               <option value="cat:comisiones">🏦 Comisiones bancarias</option>
               <option value="cat:aportaciones">💼 Aportaciones</option>
+              <option value="cat:traspasos">🔄 Traspasos propios</option>
               <option value="">Todos</option>
             </select>
             <input type="text" id="bk-buscar" oninput="bkRender()" placeholder="Buscar concepto..."
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px"/>
             <button onclick="bkCategorizar()" id="bk-cat" title="Clasificar nóminas, impuestos, comisiones, SS y aportaciones" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🏷 Categorizar</button>
-            <button onclick="bkAutoconciliar()" id="bk-auto" title="Conciliar automáticamente los movimientos con factura de importe exacto" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">⚡ Autoconciliar</button>
+            <button onclick="bkAutoconciliar()" id="bk-auto" title="Conciliación automática: casa movimientos con facturas por importe y nombre del cliente" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">⚡ Conciliación automática</button>
             <button onclick="bkCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
           </span>
         </div>
@@ -716,7 +717,7 @@
     <div class="tab-content" id="ctc-proveedores">
       <div class="card">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-          <span>Facturas y albaranes de proveedor <span style="font-weight:400;font-size:12px;color:var(--texto-suave)">(Dropbox · CONTABLE JS-TECH / 0 PROVEÏDORS)</span></span>
+          <span>Facturas recibidas y albaranes (compras) <span style="font-weight:400;font-size:12px;color:var(--texto-suave)">(Dropbox · CONTABLE JS-TECH / 0 PROVEÏDORS)</span></span>
           <span style="display:flex;gap:8px;align-items:center">
             <select id="pv-anio" onchange="pvCargar()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit"></select>
             <select id="pv-filtro" onchange="pvRender()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit">
@@ -746,11 +747,11 @@
     <div class="tab-content" id="ctc-iva">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
         <div class="card">
-          <div class="card-title">Resumen IVA del período</div>
+          <div class="card-title">Liquidación de IVA — resumen del ejercicio</div>
           <div id="iva-detalle"><div style="color:var(--texto-suave);font-size:13px">Carga los datos primero.</div></div>
         </div>
         <div class="card">
-          <div class="card-title">IVA por trimestre</div>
+          <div class="card-title">Liquidación trimestral (modelo 303)</div>
           <div id="iva-trimestres"><div style="color:var(--texto-suave);font-size:13px">Carga los datos primero.</div></div>
         </div>
       </div>
@@ -1971,7 +1972,7 @@ async function bkImportar() {
   lector.readAsText(file, 'ISO-8859-1');  // los N43 españoles van en latin-1
 }
 
-const BK_CATS = { nominas: '👥 Nóminas', impuestos: '🏛 Impuestos', seg_social: '🧾 Seg.Social/Autón.', comisiones: '🏦 Comisiones', aportaciones: '💼 Aportaciones' };
+const BK_CATS = { nominas: '👥 Nóminas', impuestos: '🏛 Impuestos', seg_social: '🧾 Seg.Social/Autón.', comisiones: '🏦 Comisiones', aportaciones: '💼 Aportaciones', traspasos: '🔄 Traspasos propios' };
 
 async function bkCargar() {
   let estado = document.getElementById('bk-filtro-estado').value;
