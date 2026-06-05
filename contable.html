@@ -487,6 +487,11 @@
         </div>
       </div>
 
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title">🏦 Saldos bancarios</div>
+        <div id="saldos-bancos" style="display:flex;gap:28px;flex-wrap:wrap;font-size:14px;color:var(--texto-suave)">Cargando saldos...</div>
+      </div>
+
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
         <div class="card">
           <div class="card-title">Desglose por método de pago</div>
@@ -692,9 +697,11 @@
               <option value="revisar">⚠ Para revisar</option>
               <option value="ok">✓ Con importe</option>
               <option value="duplicado">🧹 Duplicados</option>
+              <option value="no_factura">📦 No facturas (albaranes/avisos)</option>
             </select>
             <input type="text" id="pv-buscar" oninput="pvRender()" placeholder="Buscar proveedor o archivo..."
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:200px"/>
+            <button onclick="pvControlAlbaranes()" title="Detectar albaranes que no tienen factura posterior del mismo proveedor" style="padding:6px 12px;background:#b45309;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🔎 Albaranes sin factura</button>
             <button onclick="pvCorreo()" id="pv-correo" title="Buscar facturas PDF en el correo (Outlook + Webempresa) y dejarlas en el cajón IA" style="padding:6px 12px;background:#1a7a3f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📧 Facturas del correo</button>
             <button onclick="pvOrdenarCajon()" id="pv-cajon" title="Ordenar las facturas del cajón desastre IA en sus meses" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🗂 Ordenar cajón IA</button>
             <button onclick="pvBorrarDuplicados()" id="pv-dup" title="Eliminar del Dropbox los PDF duplicados (se conserva el original)" style="padding:6px 12px;background:#c0392b;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🧹 Duplicados</button>
@@ -807,6 +814,7 @@ function cerrarSesionContable() {
 
 // ===== INIT =====
 function initContable() {
+  try { cargarSaldos(); } catch(e) { console.warn(e); }
   try { setPeriod('month'); } catch(e) { console.warn(e); }
   try { renderCalendar(); } catch(e) { console.warn(e); }
   try { checkConexion(); } catch(e) { console.warn(e); }
@@ -2094,6 +2102,36 @@ async function pvEscanear() {
   btn.disabled = false; btn.textContent = '🔍 Escanear importes';
 }
 
+function pvControlAlbaranes() {
+  const docs = Object.values(pvDatos);
+  const albaranes = docs.filter(d => d.tipo === 'albaran' || (d.estado === 'no_factura' && d.tipo === 'albaran'));
+  const facturas = docs.filter(d => ['ok', 'corregido', 'ocr'].includes(d.estado));
+  if (!albaranes.length) { alert('No hay albaranes clasificados todavía.\n(Pulsa "🔍 Escanear importes" para clasificar los documentos.)'); return; }
+
+  const sinFactura = [];
+  albaranes.forEach(alb => {
+    const prov = (alb.proveedor || '').toLowerCase();
+    const fAlb = alb.fecha || '';
+    // ¿Existe factura del mismo proveedor con fecha igual o posterior (hasta 90 días después)?
+    const limite = fAlb ? new Date(new Date(fAlb).getTime() + 90 * 86400000).toISOString().slice(0, 10) : '9999';
+    const tiene = facturas.some(f =>
+      (f.proveedor || '').toLowerCase() === prov &&
+      (!fAlb || ((f.fecha || '') >= fAlb && (f.fecha || '') <= limite))
+    );
+    if (!tiene) sinFactura.push(alb);
+  });
+
+  if (!sinFactura.length) {
+    alert('✅ Control de albaranes: los ' + albaranes.length + ' albaranes tienen factura del proveedor.\nTodo en orden.');
+    return;
+  }
+  const lineas = sinFactura.slice(0, 25).map(a =>
+    '· ' + (a.proveedor || '¿proveedor?') + ' — ' + a.nombre + (a.fecha ? ' (' + a.fecha + ')' : '')).join('\n');
+  alert('⚠ ' + sinFactura.length + ' albarán(es) SIN factura posterior del proveedor — candidatos a reclamar:\n\n' +
+        lineas + (sinFactura.length > 25 ? '\n...' : '') +
+        '\n\n(De ' + albaranes.length + ' albaranes revisados)');
+}
+
 async function pvCorreo() {
   const btn = document.getElementById('pv-correo');
   let sugerido = '2026-01-01';
@@ -2222,6 +2260,7 @@ function pvRender() {
       if (filtro === 'revisar')    return !est || ['dudoso', 'sin_texto', 'error'].includes(est);
       if (filtro === 'ok')         return ['ok', 'corregido', 'ocr'].includes(est);
       if (filtro === 'duplicado')  return est === 'duplicado';
+      if (filtro === 'no_factura') return est === 'no_factura';
       return true;
     });
   }
@@ -2241,6 +2280,8 @@ function pvRender() {
       if (est === 'duplicado') { /* se muestra apagado */ }
       const chip = est === 'duplicado'
         ? '<span style="color:#bbb;font-size:11px">🧹 duplicado</span>'
+        : est === 'no_factura'
+        ? '<span style="color:#888;font-size:11px">📦 ' + (dat.tipo || 'no factura') + '</span>'
         : est === 'ok' || est === 'corregido' || est === 'ocr'
         ? '<span style="color:#1a7a3f;font-weight:800">' + bkFmt(dat.total) + (est === 'corregido' ? ' ✎' : est === 'ocr' ? ' 🤖' : '') + '</span>'
         : est === 'sin_texto'
@@ -2263,6 +2304,21 @@ function bkCerrarModal() {
   document.getElementById('bk-modal').style.display = 'none';
   bkMovActual = null;
   bkSeleccion = {};
+}
+
+// ── Saldos bancarios (dashboard) ──
+async function cargarSaldos() {
+  const el = document.getElementById('saldos-bancos');
+  if (!el) return;
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/eb/saldos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const d = await r.json();
+    if (!d.saldos || !d.saldos.length) { el.textContent = d.error || 'Sin cuentas bancarias vinculadas.'; return; }
+    el.innerHTML = d.saldos.map(s => s.saldo === null
+      ? '<span><b style="color:#1a2e6e">' + s.banco + '</b> · <span style="color:#c0392b;font-size:12px">' + (s.error || 'error') + '</span></span>'
+      : '<span><b style="color:#1a2e6e">' + s.banco + '</b> ·' + s.iban + ' → <b style="font-size:17px;color:' + (s.saldo >= 0 ? '#1a7a3f' : '#c0392b') + '">' + bkFmt(s.saldo) + '</b></span>'
+    ).join('');
+  } catch(e) { el.textContent = 'No se pudieron cargar los saldos: ' + e.message; }
 }
 
 // ── Enable Banking ──
