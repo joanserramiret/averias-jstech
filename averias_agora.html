@@ -2936,13 +2936,14 @@ async function doLogin() {
     // Update USER_ID with logged in user
     window.CURRENT_USER_ID = usuario.Id;
     window.CURRENT_USER_NAME = usuario.Name;
-    aplicarPermisos(usuario);
 
     // Determinar rol: por nombre O por ProfileId de Ágora (perfil "Tecnico" = Id 5)
     const USUARIOS_TECNICOS_NOMBRES = ['jordi', 'paco'];
+    const perfilNombre = ((usuario.Profile || '') + '').toLowerCase();
+    console.log('[roles] Usuario:', usuario.Name, '| Profile:', usuario.Profile);
     const profileId = usuario.ProfileId || usuario.UserGroupId || usuario.UserRoleId || 0;
     const esPorNombre = USUARIOS_TECNICOS_NOMBRES.includes(usuario.Name.toLowerCase());
-    const esPorPerfil = PERFIL_TECNICO_IDS.includes(profileId);
+    const esPorPerfil = PERFIL_TECNICO_IDS.includes(profileId) || (perfilNombre !== '' && perfilNombre.indexOf('admin') === -1);
     CURRENT_USER_ROLE = (esPorNombre || esPorPerfil) ? 'tecnico' : 'admin';
     localStorage.setItem('jstech_user_role', CURRENT_USER_ROLE);
     aplicarPermisos();
@@ -2953,20 +2954,6 @@ async function doLogin() {
   } catch(e) {
     setStatus(statusEl, 'Error al conectar: ' + e.message, 'error');
   }
-}
-
-// PERMISOS POR PERFIL DE AGORA
-function esAdmin(u) {
-  return (((u && u.Profile) || '') + '').toLowerCase().indexOf('admin') !== -1;
-}
-function aplicarPermisos(u) {
-  const admin = esAdmin(u);
-  window.IS_ADMIN = admin;
-  var tf = document.getElementById('tab-facturas');
-  if (tf) tf.style.display = admin ? '' : 'none';
-  var fb = document.getElementById('facturar-bar');
-  if (fb && !admin) fb.style.display = 'none';
-  if (!admin) switchTab('nueva');
 }
 
 function extraerCentro(notas) {
@@ -2992,7 +2979,7 @@ function actualizarBarraFacturar() {
 }
 
 async function facturarSeleccionados() {
-  if (window.IS_ADMIN === false) { alert('Tu perfil no permite facturar.'); return; }
+  if (CURRENT_USER_ROLE === 'tecnico') { alert('Tu perfil no permite facturar.'); return; }
   const sel = window._seleccionados;
   if (!sel.length) return;
   const albaranes = sel.map(i => albaranesFiltrados[i]);
@@ -3746,7 +3733,7 @@ function cerrarModalFactura(e) {
 }
 
 function switchTab(tab) {
-  if (tab === 'facturas' && window.IS_ADMIN === false) return;
+  if (tab === 'facturas' && CURRENT_USER_ROLE === 'tecnico') return;
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.getElementById('tab-' + tab).classList.add('active');
