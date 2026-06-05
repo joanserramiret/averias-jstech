@@ -1474,6 +1474,7 @@ async function doLogin() {
     window.CURRENT_USER_ID = usuario.Id;
     window.CURRENT_USER_NAME = usuario.Name;
     aplicarPermisos(usuario);
+    aplicarPermisos(usuario);
 
     await cargarClientes();
   } catch(e) {
@@ -1500,6 +1501,20 @@ function aplicarPermisos(u) {
   if (!admin) switchTab('nueva');
 }
 
+// ── PERMISOS POR PERFIL DE ÁGORA ──
+function esAdmin(u) {
+  return (((u && u.Profile) || '') + '').toLowerCase().indexOf('admin') !== -1;
+}
+function aplicarPermisos(u) {
+  const admin = esAdmin(u);
+  window.IS_ADMIN = admin;
+  var tf = document.getElementById('tab-facturas');
+  if (tf) tf.style.display = admin ? '' : 'none';
+  var fb = document.getElementById('facturar-bar');
+  if (fb && !admin) fb.style.display = 'none';
+  if (!admin) switchTab('nueva');
+}
+
 function extraerCentro(notas) {
   if (!notas) return '';
   const match = notas.match(/Centro: *([^|]+)/i);
@@ -1523,6 +1538,7 @@ function actualizarBarraFacturar() {
 }
 
 async function facturarSeleccionados() {
+  if (window.IS_ADMIN === false) { alert('Tu perfil no permite facturar.'); return; }
   if (window.IS_ADMIN === false) { alert('Tu perfil no permite facturar.'); return; }
   const sel = window._seleccionados;
   if (!sel.length) return;
@@ -1936,6 +1952,7 @@ function cerrarModalFactura(e) {
 }
 
 function switchTab(tab) {
+  if (tab === 'facturas' && window.IS_ADMIN === false) return;
   if (tab === 'facturas' && window.IS_ADMIN === false) return;  // técnicos sin acceso
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
