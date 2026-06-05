@@ -735,6 +735,7 @@
             <input type="text" id="pv-buscar" oninput="pvRender()" placeholder="Buscar proveedor o archivo..."
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:200px"/>
             <button onclick="pvControlAlbaranes()" title="Detectar albaranes que no tienen factura posterior del mismo proveedor" style="padding:6px 12px;background:#b45309;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🔎 Albaranes sin factura</button>
+            <button onclick="pvCuadrarAnio()" title="Mover a su carpeta de año los documentos cuya fecha real no coincide con el año actual" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📅 Cuadrar por año</button>
             <button onclick="pvCorreo()" id="pv-correo" title="Buscar facturas PDF en el correo (Outlook + Webempresa) y dejarlas en el cajón IA" style="padding:6px 12px;background:#1a7a3f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📧 Facturas del correo</button>
             <button onclick="pvOrdenarCajon()" id="pv-cajon" title="Ordenar las facturas del cajón desastre IA en sus meses" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🗂 Ordenar cajón IA</button>
             <button onclick="pvBorrarDuplicados()" id="pv-dup" title="Eliminar del Dropbox los PDF duplicados (se conserva el original)" style="padding:6px 12px;background:#c0392b;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🧹 Duplicados</button>
@@ -744,6 +745,15 @@
           </span>
         </div>
         <div id="pv-resumen" style="font-size:12px;color:var(--texto-suave);margin-bottom:8px"></div>
+        <div id="pv-barra-sel" style="display:none;position:sticky;top:8px;z-index:50;align-items:center;gap:10px;flex-wrap:wrap;background:#1a2e6e;color:#fff;border-radius:10px;padding:10px 14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.18)">
+          <b id="pv-sel-count">0 seleccionado(s)</b>
+          <span style="opacity:.8;font-size:12px">marcar como:</span>
+          <button onclick="pvTipoLote('factura')" style="padding:5px 12px;background:#fff;color:#1a2e6e;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">🧾 Factura</button>
+          <button onclick="pvTipoLote('albaran')" style="padding:5px 12px;background:#fff;color:#1a2e6e;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">📋 Albarán</button>
+          <button onclick="pvTipoLote('aviso')" style="padding:5px 12px;background:#fff;color:#1a2e6e;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">🔔 Aviso</button>
+          <button onclick="pvTipoLote('otro')" style="padding:5px 12px;background:#fff;color:#1a2e6e;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">📦 Otro</button>
+          <button onclick="pvSel.clear();pvRender()" style="margin-left:auto;padding:5px 10px;background:transparent;color:#fff;border:1px solid rgba(255,255,255,.5);border-radius:7px;font-size:12px;cursor:pointer">Quitar selección</button>
+        </div>
         <div id="pv-lista"><div style="color:var(--texto-suave);font-size:13px">Pulsa ⟳ para cargar.</div></div>
       </div>
     </div>
@@ -3137,6 +3147,7 @@ function pvRender() {
           ? '<span style="color:#c0392b;font-size:11px">📷 escaneo</span>'
           : est ? '<span style="color:#c96a10;font-size:11px">¿?</span>' : '';
       return '<tr style="border-bottom:1px solid #f3f3f3">' +
+        '<td style="padding:5px;text-align:center"><input type="checkbox" class="pv-chk" data-ruta="' + ruta.replace(/"/g, '&quot;') + '" onchange="pvSelChange()" style="width:auto;cursor:pointer"' + (pvSel.has(ruta) ? ' checked' : '') + '/></td>' +
         '<td style="padding:5px;white-space:nowrap;color:#1a2e6e;font-weight:700">' + (a.proveedor || '—') + '</td>' +
         '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + a.nombre + '</td>' +
         '<td style="white-space:nowrap;color:#888">' + (dat.fecha || (a.modificado || '').slice(0, 10)) + '</td>' +
@@ -3148,8 +3159,72 @@ function pvRender() {
           '<button onclick="pvBorrar(\'' + ruta.replace(/'/g, "\\'") + '\',\'' + a.nombre.replace(/'/g, "\\'") + '\')" title="Mover a PARA BORRAR (se cuela y no debería estar)" style="padding:3px 8px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;cursor:pointer;margin-left:4px">🗑</button></td></tr>';
     }).join('');
     return '<div style="font-weight:800;font-size:13px;color:#1a2e6e;margin:12px 0 4px">' + mes + ' <span style="font-weight:400;color:#888">(' + porMes[mes].length + ')</span></div>' +
-      '<table style="width:100%;border-collapse:collapse;font-size:12.5px">' + filas + '</table>';
+      '<table style="width:100%;border-collapse:collapse;font-size:12.5px">' +
+      '<tr style="color:#aaa;font-size:11px"><th style="padding:4px"><input type="checkbox" onchange="pvSelTodos(this.checked)" title="Seleccionar todo lo visible" style="width:auto;cursor:pointer"/></th><th></th><th></th><th></th><th></th><th></th></tr>' +
+      filas + '</table>';
   }).join('');
+  pvSelChange();
+}
+
+// Reubica los documentos cuya fecha real cae en otro año a su carpeta correcta del Dropbox
+async function pvCuadrarAnio() {
+  const anio = document.getElementById('pv-anio').value || new Date().getFullYear();
+  let d;
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/proveedores/cuadrar_anio?anio=' + anio, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    d = await r.json();
+  } catch(e) { alert('✗ ' + e.message); return; }
+  if (!d.descuadrados) { alert('✓ Todo cuadrado: en ' + anio + ' no hay documentos con fecha de otro año.'); return; }
+  const reparto = Object.entries(d.por_destino || {}).map(([a, n]) => '· ' + n + ' → ' + a).join('\n');
+  if (!confirm('📅 En la carpeta ' + anio + ' hay ' + d.descuadrados + ' documento(s) cuya fecha real es de otro año:\n\n' +
+    reparto + '\n\n¿Moverlos a su carpeta de año en el Dropbox? (misma estructura; no se borra nada)')) return;
+  try {
+    const r2 = await fetch(BRIDGE_URL_C + '/proveedores/cuadrar_anio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ anio: anio, ejecutar: true })
+    });
+    const r3 = await r2.json();
+    alert('✓ ' + (r3.movidos || 0) + ' documento(s) reubicados en su año' + (r3.errores ? ' · ' + r3.errores + ' con error' : '') + '.');
+    await pvCargarDatos(anio);
+    pvRender();
+  } catch(e) { alert('✗ ' + e.message); }
+}
+
+const pvSel = new Set();
+function pvSelChange() {
+  document.querySelectorAll('.pv-chk').forEach(ch => {
+    const r = ch.getAttribute('data-ruta');
+    if (ch.checked) pvSel.add(r); else pvSel.delete(r);
+  });
+  const barra = document.getElementById('pv-barra-sel');
+  if (barra) {
+    barra.style.display = pvSel.size ? 'flex' : 'none';
+    const cont = document.getElementById('pv-sel-count');
+    if (cont) cont.textContent = pvSel.size + ' seleccionado(s)';
+  }
+}
+function pvSelTodos(on) {
+  document.querySelectorAll('.pv-chk').forEach(ch => { ch.checked = on; });
+  pvSelChange();
+}
+async function pvTipoLote(tipo) {
+  if (!pvSel.size) return;
+  if (!confirm('Marcar ' + pvSel.size + ' documento(s) como "' + tipo + '"?\nTu elección manda sobre el clasificador para siempre.')) return;
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/proveedores/tipo_lote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ rutas: [...pvSel], tipo: tipo })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      pvSel.clear();
+      const anio = document.getElementById('pv-anio').value || new Date().getFullYear();
+      await pvCargarDatos(anio);
+      pvRender();
+    } else alert('✗ ' + (d.error || 'Error'));
+  } catch(e) { alert('✗ ' + e.message); }
 }
 
 // Corrige a mano el tipo de un documento de proveedor (queda fijado: el escáner lo respeta)
