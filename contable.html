@@ -675,6 +675,9 @@
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
           <span>Movimientos bancarios · conciliación</span>
           <span style="display:flex;gap:8px;align-items:center">
+            <select id="bk-filtro-banco" onchange="bkRender()" title="Filtrar por banco" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit">
+              <option value="">🏦 Todos los bancos</option>
+            </select>
             <select id="bk-filtro-estado" onchange="bkCargar()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit">
               <option value="pendiente" selected>⏳ Pendientes</option>
               <option value="conciliado">✅ Conciliados</option>
@@ -687,8 +690,8 @@
               <option value="cat:traspasos">🔄 Traspasos propios</option>
               <option value="">Todos</option>
             </select>
-            <input type="text" id="bk-buscar" oninput="bkRender()" placeholder="Buscar concepto..."
-                   style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px"/>
+            <input type="text" id="bk-buscar" oninput="bkRender()" placeholder="🔍 Buscar en todo: concepto, importe, cliente, factura..."
+                   style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:240px"/>
             <button onclick="bkCategorizar()" id="bk-cat" title="Clasificar nóminas, impuestos, comisiones, SS y aportaciones" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🏷 Categorizar</button>
             <button onclick="bkAutoconciliar()" id="bk-auto" title="Conciliación automática: casa movimientos con facturas por importe y nombre del cliente" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">⚡ Conciliación automática</button>
             <button onclick="bkCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
@@ -991,12 +994,17 @@ async function cargarDatos() {
 
     const nFact = todasFacturasC.filter(f => f._tipo === 'factura').length;
     const nAlb = todasFacturasC.filter(f => f._tipo === 'albaran').length;
+    // Chivato de series: para detectar series que Ágora no está devolviendo
+    const porSerie = {};
+    todasFacturasC.forEach(f => { const s = f.Serie || '¿?'; porSerie[s] = (porSerie[s] || 0) + 1; });
+    const seriesTxt = Object.entries(porSerie).sort().map(([s, n]) => s + '×' + n).join(' · ');
+    console.log('[carga] documentos por serie:', porSerie);
     ocultarSplash();
     if (diasFallidosC.length) {
       statusEl.textContent = '⚠ OJO: ' + diasFallidosC.length + ' día(s) sin respuesta tras 3 intentos (' +
         diasFallidosC.slice(0, 5).join(', ') + (diasFallidosC.length > 5 ? '...' : '') +
         ') — sus facturas NO están cargadas. Vuelve a pulsar Cargar.';
-    } else statusEl.textContent = '✓ ' + nFact + ' facturas y ' + nAlb + ' albaranes' + (errores ? ' (' + errores + ' días sin respuesta)' : '');
+    } else statusEl.textContent = '✓ ' + nFact + ' facturas y ' + nAlb + ' albaranes' + (errores ? ' (' + errores + ' días sin respuesta)' : '') + '  [' + seriesTxt + ']';
 
     btn.textContent = '🔍 Cargar datos';
 
@@ -1990,6 +1998,7 @@ async function bkCargar() {
       fetch(BRIDGE_URL_C + '/banco/resumen', { headers: { 'ngrok-skip-browser-warning': 'true' } })
     ]);
     bkMovs = (await rMov.json()).movimientos || [];
+    bkActualizarBancos();
     const res = await rRes.json();
     document.getElementById('bk-kpi-pendientes').textContent = res.pendientes ?? '—';
     document.getElementById('bk-kpi-abonos').textContent = bkFmt(res.abonos_pendientes);
@@ -2009,14 +2018,63 @@ async function bkCargar() {
   }
 }
 
+let bkOrden = { campo: 'fecha', dir: -1 };  // ordenación actual de la tabla
+
+function bkOrdenarPor(campo) {
+  if (bkOrden.campo === campo) bkOrden.dir = -bkOrden.dir;
+  else bkOrden = { campo: campo, dir: campo === 'importe' || campo === 'fecha' ? -1 : 1 };
+  bkRender();
+}
+
+function bkActualizarBancos() {
+  const sel = document.getElementById('bk-filtro-banco');
+  if (!sel) return;
+  const actual = sel.value;
+  const bancos = [...new Set(bkMovs.map(m => m.banco).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">🏦 Todos los bancos</option>' +
+    bancos.map(b => '<option value="' + b + '"' + (b === actual ? ' selected' : '') + '>' + b + '</option>').join('');
+}
+
 function bkRender() {
   const listEl = document.getElementById('bk-lista');
   const q = (document.getElementById('bk-buscar').value || '').toLowerCase();
+  const banco = (document.getElementById('bk-filtro-banco') || {}).value || '';
   let lista = bkMovs;
-  if (q) lista = lista.filter(m => (m.concepto || '').toLowerCase().includes(q) || (m.referencia || '').toLowerCase().includes(q));
-  if (!lista.length) { listEl.innerHTML = '<div style="color:var(--texto-suave);font-size:13px">Sin movimientos' + (q ? ' que coincidan.' : '.') + '</div>'; return; }
-  listEl.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12.5px">' +
-    '<tr style="text-align:left;color:#888;border-bottom:1.5px solid #eee"><th style="padding:6px">Fecha</th><th>Banco</th><th>Concepto</th><th style="text-align:right">Importe</th><th>Estado</th><th></th></tr>' +
+  if (banco) lista = lista.filter(m => m.banco === banco);
+  if (q) lista = lista.filter(m => {
+    // Buscador global: concepto, referencia, banco, fecha, importe, categoría, estado y facturas/clientes conciliados
+    const conc = m.conciliado || [];
+    const blob = [
+      m.concepto, m.referencia, m.banco, m.fecha,
+      String(m.importe), bkFmt(m.importe), m.categoria, BK_CATS[m.categoria],
+      conc.length ? 'conciliado' : (m.categoria ? 'categorizado' : 'pendiente'),
+      conc.map(f => f.serie + '-' + f.numero).join(' '),
+      conc.map(f => f.cliente || '').join(' ')
+    ].join(' ').toLowerCase();
+    return blob.includes(q);
+  });
+  if (!lista.length) { listEl.innerHTML = '<div style="color:var(--texto-suave);font-size:13px">Sin movimientos' + (q || banco ? ' que coincidan.' : '.') + '</div>'; return; }
+
+  // Ordenación por columna
+  const campo = bkOrden.campo, dir = bkOrden.dir;
+  const claveEstado = m => (m.conciliado ? 2 : m.categoria ? 1 : 0);
+  lista = [...lista].sort((a, b) => {
+    let va, vb;
+    if (campo === 'importe') { va = a.importe; vb = b.importe; }
+    else if (campo === 'estado') { va = claveEstado(a); vb = claveEstado(b); }
+    else { va = (a[campo] || '').toString().toLowerCase(); vb = (b[campo] || '').toString().toLowerCase(); }
+    return va < vb ? -dir : va > vb ? dir : 0;
+  });
+
+  const flecha = c => bkOrden.campo === c ? (bkOrden.dir === 1 ? ' ▲' : ' ▼') : '';
+  const th = (c, txt, extra) => '<th style="padding:6px;cursor:pointer;user-select:none;' + (extra || '') +
+    '" onclick="bkOrdenarPor(\'' + c + '\')" title="Ordenar por ' + txt + '">' + txt + flecha(c) + '</th>';
+
+  listEl.innerHTML = '<div style="font-size:11px;color:var(--texto-suave);margin-bottom:4px">' + lista.length + ' movimiento(s)</div>' +
+    '<table style="width:100%;border-collapse:collapse;font-size:12.5px">' +
+    '<tr style="text-align:left;color:#888;border-bottom:1.5px solid #eee">' +
+    th('fecha', 'Fecha') + th('banco', 'Banco') + th('concepto', 'Concepto') +
+    th('importe', 'Importe', 'text-align:right;') + th('estado', 'Estado') + '<th></th></tr>' +
     lista.map(m => {
       const conc = m.conciliado;
       const badge = conc
