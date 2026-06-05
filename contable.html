@@ -2371,7 +2371,8 @@ async function bkRemesas() {
             return '<tr' + (dev ? ' style="color:#c0392b;font-weight:700"' : '') + '><td>' + fra + '</td><td>' +
               (f.cliente || '—') + (dev ? ' ↩ DEVUELTO' : '') +
               '</td><td style="text-align:right">' + bkFmt(f.importe) + '</td></tr>';
-          }).join('') + '</table>'
+          }).join('') + '</table>' +
+          '<div style="text-align:right;margin-top:6px"><button onclick="remesaDeshacer(' + m.id + ')" title="Deshacer este desglose: el movimiento vuelve a pendientes y las facturas quedan libres" style="padding:4px 10px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;cursor:pointer">✕ Deshacer desglose</button></div>'
         : '<div style="font-size:12px;color:var(--texto-suave);margin-top:6px">Sin desglosar — súbeme el listado del banco con 📎 (PDF de Bankinter o TXT del Sabadell). ' +
           '<button onclick="remesaProponerCuadre(' + m.id + ')" style="margin-left:8px;padding:4px 10px;background:#fff3e0;border:1.5px solid #e8b27a;color:#b45309;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🧮 Proponer cuadre</button>' +
           '<button onclick="remesaCerrarSinDesglose(' + m.id + ',' + m.importe + ')" style="margin-left:6px;padding:4px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:6px;font-size:11px;cursor:pointer">✓ Cerrar sin desglose</button>' +
@@ -2548,6 +2549,19 @@ async function remesaProponerCuadre(id) {
       body: JSON.stringify({ id: id, facturas: sol.map(c => ({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente, situacion: 'abonado', origen: 'propuesta' })) })
     });
     if ((await r2.json()).ok) bkRemesas(); else alert('✗ No se pudo guardar');
+  } catch(e) { alert('✗ ' + e.message); }
+}
+
+// Deshace el desglose de una remesa (propuesta aceptada, cierre sin desglose o importación)
+async function remesaDeshacer(id) {
+  if (!confirm('¿Deshacer el desglose de esta remesa?\nVuelve a "pendiente" y sus facturas quedan libres — no se borra nada.\nPodrás volver a desglosarla con 📎, 🧮 o ✓.')) return;
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: id, facturas: [] })
+    });
+    if ((await r.json()).ok) bkRemesas(); else alert('✗ No se pudo deshacer');
   } catch(e) { alert('✗ ' + e.message); }
 }
 
@@ -2847,7 +2861,8 @@ function pvRender() {
         '<td style="white-space:nowrap;color:#888;text-align:right">' + kb + '</td>' +
         '<td style="text-align:right;white-space:nowrap">' +
           '<button onclick="pvCambiarTipo(\'' + ruta.replace(/'/g, "\\'") + '\',\'' + (dat.tipo || 'factura') + '\')" title="Corregir el tipo (factura/albarán/aviso/otro) — tu corrección manda sobre el clasificador" style="padding:3px 8px;background:#fff3e0;border:1px solid #e8b27a;border-radius:6px;font-size:11px;cursor:pointer;margin-right:4px">' + (dat.tipo === 'albaran' ? '📋' : dat.tipo === 'aviso' ? '🔔' : dat.tipo === 'otro' ? '📦' : (!dat.tipo || dat.tipo === 'factura') ? '🧾' : '🏷') + (dat.tipo_manual ? '✓' : '') + '</button>' +
-          '<a href="' + url + '" target="_blank" style="padding:3px 10px;background:#1a2e6e;color:#fff;border-radius:6px;font-size:11px;font-weight:700;text-decoration:none">👁 Ver</a></td></tr>';
+          '<a href="' + url + '" target="_blank" style="padding:3px 10px;background:#1a2e6e;color:#fff;border-radius:6px;font-size:11px;font-weight:700;text-decoration:none">👁 Ver</a>' +
+          '<button onclick="pvBorrar(\'' + ruta.replace(/'/g, "\\'") + '\',\'' + a.nombre.replace(/'/g, "\\'") + '\')" title="Mover a PARA BORRAR (se cuela y no debería estar)" style="padding:3px 8px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;cursor:pointer;margin-left:4px">🗑</button></td></tr>';
     }).join('');
     return '<div style="font-weight:800;font-size:13px;color:#1a2e6e;margin:12px 0 4px">' + mes + ' <span style="font-weight:400;color:#888">(' + porMes[mes].length + ')</span></div>' +
       '<table style="width:100%;border-collapse:collapse;font-size:12.5px">' + filas + '</table>';
@@ -2904,6 +2919,24 @@ async function pvGuardarTipo(ruta, tipo) {
       const anio = document.getElementById('pv-anio').value || new Date().getFullYear();
       await pvCargarDatos(anio);
       pvRender();
+    } else alert('✗ ' + (d.error || 'Error'));
+  } catch(e) { alert('✗ ' + e.message); }
+}
+
+// Aparta un PDF colado a la carpeta PARA BORRAR; opcionalmente aprende el patrón
+async function pvBorrar(ruta, nombre) {
+  if (!confirm('🗑 "' + nombre + '"\n\n¿Mover a la carpeta PARA BORRAR del Dropbox?\n(No se borra nada definitivamente — Raquel vacía esa carpeta cuando quiera.)')) return;
+  const recordar = confirm('¿Quieres que me acuerde?\n\nAceptar = los futuros archivos con nombre parecido ("' + nombre.replace(/\d+/g, '#') + '") se apartarán SOLOS al escanear o al ordenar el cajón.\nCancelar = solo este archivo.');
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/proveedores/borrar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ ruta: ruta, recordar: recordar })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      pvCargar();
+      if (d.patron) console.log('[basura] regla aprendida:', d.patron);
     } else alert('✗ ' + (d.error || 'Error'));
   } catch(e) { alert('✗ ' + e.message); }
 }
