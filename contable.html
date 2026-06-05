@@ -668,6 +668,17 @@
         </div>
       </div>
 
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <span>🧩 Remesas y devoluciones <span style="font-weight:400;font-size:12px;color:var(--texto-suave)">(para no tener que entrar al banco)</span></span>
+          <span style="display:flex;gap:8px;align-items:center">
+            <button onclick="exportarRemesas()" title="Descargar el detalle en Excel" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📊 Excel</button>
+            <button onclick="bkRemesas()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
+          </span>
+        </div>
+        <div id="bk-remesas"><div style="color:var(--texto-suave);font-size:13px">Pulsa ⟳ para cargar las remesas.</div></div>
+      </div>
+
       <div class="card">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
           <span>Movimientos</span>
@@ -1830,7 +1841,7 @@ function switchTabC(tab) {
   document.getElementById('ctab-' + tab).classList.add('active');
   document.getElementById('ctc-' + tab).classList.add('active');
   if (tab === 'calendario') renderCalendar();
-  if (tab === 'banco') { bkCargar(); bkGcEstado(); }
+  if (tab === 'banco') { bkCargar(); bkGcEstado(); bkRemesas(); }
   if (tab === 'proveedores' && !pvArchivos.length) pvCargar();
 }
 
@@ -2196,6 +2207,17 @@ async function bkAutoconciliar() {
   const pendientes = bkMovs.filter(m => !m.conciliado);
   if (!pendientes.length) { alert('No hay movimientos pendientes de conciliar en la vista actual.'); return; }
 
+  // Aviso si hay movimientos anteriores a la primera factura cargada (cobros de meses previos sin candidata)
+  const fechasFact = (typeof todasFacturasC !== 'undefined' ? todasFacturasC : [])
+    .filter(f => f._tipo === 'factura' && f.Date).map(f => f.Date.slice(0, 10)).sort();
+  const minMov = pendientes.map(m => m.fecha || '').filter(Boolean).sort()[0] || '';
+  if (fechasFact.length && minMov && minMov < fechasFact[0]) {
+    if (!confirm('⚠ Hay movimientos del banco desde ' + minMov + ' pero las facturas cargadas empiezan el ' +
+        fechasFact[0] + '.\nLos cobros de facturas anteriores NO podrán conciliar.\n\n' +
+        'Consejo: en la pestaña Facturas, carga desde más atrás (p.ej. todo ' +
+        (parseInt(fechasFact[0]) - 1) + ') y vuelve a probar.\n\n¿Continuar igualmente?')) return;
+  }
+
   btn.disabled = true;
   let hechos = 0, dudosos = 0, remesas = 0, porNombre = 0, porGrupo = 0;
   for (const m of pendientes) {
@@ -2251,6 +2273,96 @@ async function bkAutoconciliar() {
         '\n· ' + dudosos + ' con varias facturas candidatas y sin nombre en el concepto (a mano)' +
         '\n· ' + (pendientes.length - hechos - dudosos) + ' sin pareja');
   bkCargar();
+}
+
+// ── 🧩 REMESAS Y DEVOLUCIONES ──
+const RE_REMESA = /REM\.|REMESA|RECIBOS|ADEUDOS/i;
+const RE_DEVOL = /DEVOL|DEVUELT|IMPAGAD|DEV\.?\s*RECIBO|RECIBO\s+DEV/i;
+let bkRemesasDatos = { remesas: [], devoluciones: [] };
+
+async function bkRemesas() {
+  const el = document.getElementById('bk-remesas');
+  el.innerHTML = '<div style="color:var(--texto-suave);font-size:13px"><span class="spinner"></span>Buscando remesas...</div>';
+  let movs = [];
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    movs = (await r.json()).movimientos || [];
+  } catch(e) { el.innerHTML = '<div style="color:#c0392b;font-size:13px">Error: ' + e.message + '</div>'; return; }
+
+  const remesas = movs.filter(m => m.importe > 0 && RE_REMESA.test(m.concepto || ''))
+    .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+  const devoluciones = movs.filter(m => m.importe < 0 && RE_DEVOL.test(m.concepto || ''))
+    .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+  bkRemesasDatos = { remesas, devoluciones };
+
+  if (!remesas.length && !devoluciones.length) {
+    el.innerHTML = '<div style="color:var(--texto-suave);font-size:13px">No se han detectado remesas ni devoluciones en los movimientos cargados.</div>';
+    return;
+  }
+
+  let html = '';
+  if (remesas.length) {
+    const total = remesas.reduce((s, m) => s + m.importe, 0);
+    const desglosadas = remesas.filter(m => m.conciliado && m.conciliado.length).length;
+    html += '<div style="font-size:12.5px;margin-bottom:8px;color:var(--texto-suave)"><b>' + remesas.length +
+      ' remesas</b> · ' + bkFmt(total) + ' · ' + desglosadas + ' desglosadas / ' + (remesas.length - desglosadas) + ' pendientes</div>';
+    html += remesas.map(m => {
+      const facts = m.conciliado || [];
+      const sumF = facts.reduce((s, f) => s + (f.importe || 0), 0);
+      const resto = m.importe - sumF;
+      const estado = facts.length
+        ? (Math.abs(resto) < 0.01 ? '<span style="color:#1b7a3d;font-weight:700">✓ desglosada</span>'
+                                   : '<span style="color:#c96a10;font-weight:700">⚠ quedan ' + bkFmt(resto) + ' sin explicar</span>')
+        : '<span style="color:#c0392b;font-weight:700">⏳ sin desglosar</span>';
+      const detalle = facts.length
+        ? '<table style="width:100%;font-size:12px;margin-top:6px"><tr style="color:var(--texto-suave)"><th style="text-align:left">Factura</th><th style="text-align:left">Cliente</th><th style="text-align:right">Importe</th></tr>' +
+          facts.map(f => '<tr><td><b>' + f.serie + '-' + f.numero + '</b></td><td>' + (f.cliente || '—') +
+            '</td><td style="text-align:right">' + bkFmt(f.importe) + '</td></tr>').join('') + '</table>'
+        : '<div style="font-size:12px;color:var(--texto-suave);margin-top:6px">Aún sin facturas asociadas — pasa el ⚡ Autoconciliar o desglósala desde el movimiento.</div>';
+      return '<details style="border:1px solid #e4e8f3;border-radius:8px;padding:8px 12px;margin-bottom:6px">' +
+        '<summary style="cursor:pointer;display:flex;gap:10px;align-items:center;font-size:12.5px;flex-wrap:wrap">' +
+        '<b>' + (m.fecha || '—') + '</b><span style="color:var(--texto-suave)">' + (m.banco || '') + '</span>' +
+        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (m.concepto || '') + '">' + (m.concepto || '') + '</span>' +
+        '<b>' + bkFmt(m.importe) + '</b>' + estado + ' <span style="color:var(--texto-suave)">(' + (facts.length || 0) + ' fra.)</span></summary>' +
+        detalle + '</details>';
+    }).join('');
+  }
+  if (devoluciones.length) {
+    html += '<div style="font-size:12.5px;margin:14px 0 8px;color:#c0392b"><b>↩ ' + devoluciones.length +
+      ' devoluciones de recibos</b> · ' + bkFmt(devoluciones.reduce((s, m) => s + m.importe, 0)) + ' — candidatas a reclamar:</div>';
+    html += '<table style="width:100%;font-size:12px"><tr style="color:var(--texto-suave)"><th style="text-align:left">Fecha</th><th style="text-align:left">Banco</th><th style="text-align:left">Concepto</th><th style="text-align:right">Importe</th></tr>' +
+      devoluciones.map(m => '<tr><td>' + (m.fecha || '—') + '</td><td>' + (m.banco || '') + '</td><td>' +
+        (m.concepto || '') + '</td><td style="text-align:right;color:#c0392b;font-weight:700">' + bkFmt(m.importe) + '</td></tr>').join('') + '</table>';
+  }
+  el.innerHTML = html;
+}
+
+function exportarRemesas() {
+  const { remesas, devoluciones } = bkRemesasDatos;
+  if (!remesas.length && !devoluciones.length) { alert('Primero carga las remesas con ⟳.'); return; }
+  let csv = 'Tipo;Fecha;Banco;Concepto;Importe;Factura;Cliente;Importe factura;Estado\n';
+  const esc = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  remesas.forEach(m => {
+    const facts = m.conciliado || [];
+    const sumF = facts.reduce((s, f) => s + (f.importe || 0), 0);
+    const estado = facts.length ? (Math.abs(m.importe - sumF) < 0.01 ? 'Desglosada' : 'Parcial') : 'Sin desglosar';
+    if (!facts.length) {
+      csv += ['Remesa', m.fecha, m.banco, esc(m.concepto), String(m.importe).replace('.', ','), '', '', '', estado].join(';') + '\n';
+    } else facts.forEach((f, i) => {
+      csv += ['Remesa', m.fecha, m.banco, esc(m.concepto), i === 0 ? String(m.importe).replace('.', ',') : '',
+        f.serie + '-' + f.numero, esc(f.cliente), String(f.importe || 0).replace('.', ','), i === 0 ? estado : ''].join(';') + '\n';
+    });
+  });
+  devoluciones.forEach(m => {
+    csv += ['Devolución', m.fecha, m.banco, esc(m.concepto), String(m.importe).replace('.', ','), '', '', '', 'Reclamar'].join(';') + '\n';
+  });
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'remesas_jstech_' + new Date().toISOString().split('T')[0] + '.csv';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ── PROVEEDORES (Dropbox) ──
