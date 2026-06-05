@@ -1241,8 +1241,85 @@ async function subirCajasFaltantes() {
       if (j.ok) ok++; else { errores++; console.warn('[cajas]', nombre, j.error); }
     } catch(e) { errores++; console.warn('[cajas]', nombre, e.message); }
   }
+  // Resumen Facturas.xls por día (réplica del export de Ágora) para los días tocados o sin xls
+  const diasFaltan = new Set(faltan.map(f => f.Date.split('T')[0]));
+  const diasXls = [...new Set(facts.map(f => f.Date.split('T')[0]))].filter(fecha => {
+    const dia = existentes[fecha] || [];
+    if (dia.includes('__DIA_YA_SUBIDO__')) return false;          // día antiguo completo (zip)
+    return diasFaltan.has(fecha) || !dia.includes('__TIENE_XLS__'); // día con subidas nuevas o sin resumen
+  });
+  let xlsOk = 0;
+  for (const fecha of diasXls) {
+    try {
+      const delDia = facts.filter(f => f.Date.split('T')[0] === fecha);
+      const r = await fetch(BRIDGE_URL_C + '/cajas/subir_xls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ fecha: fecha, html: generarXlsDiaC(fecha, delDia) })
+      });
+      if ((await r.json()).ok) xlsOk++;
+    } catch(e) { console.warn('[cajas xls]', fecha, e.message); }
+  }
+
   setStatusC(statusEl, (errores ? '⚠ ' : '✓ ') + ok + ' facturas subidas a CAJAS' +
+    (xlsOk ? ' · ' + xlsOk + ' resúmenes Facturas.xls' : '') +
     (errores ? ' · ' + errores + ' con error (mira la consola)' : ''), errores ? 'error' : 'success');
+}
+
+// Réplica del Facturas.xls diario que exportaba Ágora (HTML-Excel, mismas columnas)
+function generarXlsDiaC(fecha, facts) {
+  const nf = v => (parseFloat(v) || 0).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fes = s => { const [a, m, d] = s.split('T')[0].split('-'); return d + '/' + m + '/' + a; };
+  const fhora = s => { const t = (s.split('T')[1] || '').slice(0, 5); return fes(s) + (t ? ' ' + t : ''); };
+  const tipoDoc = f => {
+    const dt = (f.DocumentType || '').toString();
+    if (/BasicRefund/i.test(dt)) return 'Dev. Simp.';
+    if (/Refund/i.test(dt)) return 'Devolución';
+    if (/Basic/i.test(dt)) return 'Fra. Simp.';
+    if (dt) return 'Factura';
+    const s = (f.Serie || '').toUpperCase();
+    if (s.startsWith('D') && !s.startsWith('DF')) return 'Dev. Simp.';
+    if (s.endsWith('D')) return 'Devolución';
+    if (s.startsWith('T')) return 'Fra. Simp.';
+    return 'Factura';
+  };
+  const esc = t => (t == null ? '' : String(t)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // Orden como Ágora: por número de documento
+  const orden = [...facts].sort((a, b) => (a.Serie + '-' + a.Number).localeCompare(b.Serie + '-' + b.Number));
+  let base = 0, cuota = 0, total = 0;
+  const filas = orden.map(f => {
+    const c = f.Customer || {};
+    const t = f.Totals || {};
+    base += t.NetAmount || 0; cuota += t.VatAmount || 0; total += t.GrossAmount || 0;
+    const pagos = (f.Payments || []).map(p => p.MethodName || '').filter(Boolean).join(' + ');
+    return '<tr>' + [
+      fes(f.Date), f.Serie + '-' + f.Number, '', '', '', (f.User && f.User.Name) || '',
+      nf(t.NetAmount), nf(t.VatAmount), nf(t.GrossAmount), nf(0),
+      fhora(f.Date), tipoDoc(f), pagos,
+      c.BusinessName || c.FiscalName || '', c.Cif ? 'España' : '', c.Cif || '', '',
+      c.Street || '', c.City || '', '', c.ZipCode || '', '', '', ''
+    ].map(v => '<td>' + esc(v) + '</td>').join('') + '</tr>';
+  }).join('\n');
+
+  const cab = ['Fecha','Número','TPV','Centro','Ubicación','Usuario','Base','Cuota','Total','Propina',
+    'Fecha Creación','Tipo Doc.','Forma de Pago','Cliente','País','CIF/NIF','Cuenta Contable',
+    'Dirección','Población','Provincia','Código Postal','Id Proforma','Origen Dev.','Doc. Original'];
+  const pie = ['', '', '', '', '', '', nf(base), nf(cuota), nf(total), nf(0),
+    '', '', '', '', '', '', '', '', '', '', '', '', '', ''];
+
+  return '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">\n' +
+    '<head>\n<meta charset="UTF-8">\n<!-- generado-por-panel-contable -->\n<style>\n' +
+    '.header {background-color: #ec133d; color: white; font-weight: bold}\n' +
+    '.footer {font-weight: bold}\n td { vertical-align: top }\n' +
+    'body, td, th { background: white; font-family: Arial, Helvetica, sans-serif; font-size: 12px; }\n' +
+    '</style>\n<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Facturas</x:Name>' +
+    '<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->\n' +
+    '</head>\n<body>\n<table border="1">\n' +
+    '<tr>' + cab.map(h => '<th class="header">' + h + '</th>').join('') + '</tr>\n' +
+    filas + '\n' +
+    '<tr class="footer">' + pie.map(v => '<td class="footer">' + v + '</td>').join('') + '</tr>\n' +
+    '</table>\n</body>\n</html>';
 }
 
 // ===== EXCEL EXPORT =====
