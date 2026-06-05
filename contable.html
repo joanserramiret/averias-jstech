@@ -669,6 +669,7 @@
             </select>
             <input type="text" id="bk-buscar" oninput="bkRender()" placeholder="Buscar concepto..."
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px"/>
+            <button onclick="bkAutoconciliar()" id="bk-auto" title="Conciliar automáticamente los movimientos con factura de importe exacto" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">⚡ Autoconciliar</button>
             <button onclick="bkCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
           </span>
         </div>
@@ -1883,6 +1884,49 @@ async function bkDesconciliar(id) {
     });
     bkCargar();
   } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function bkAutoconciliar() {
+  const btn = document.getElementById('bk-auto');
+  const cands = bkCandidatos();
+  if (!cands.length) { alert('Primero carga los datos del período (botón Cargar) para tener las facturas.'); return; }
+
+  // Facturas ya usadas en alguna conciliación (de cualquier movimiento)
+  let usadas = new Set();
+  try {
+    const rTodos = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    ((await rTodos.json()).movimientos || []).forEach(m => {
+      (m.conciliado || []).forEach(f => usadas.add(f.serie + '-' + f.numero));
+    });
+  } catch(e) { alert('Error consultando movimientos: ' + e.message); return; }
+
+  const pendientes = bkMovs.filter(m => !m.conciliado && m.importe > 0);
+  if (!pendientes.length) { alert('No hay abonos pendientes de conciliar en la vista actual.'); return; }
+
+  btn.disabled = true;
+  let hechos = 0, dudosos = 0;
+  for (const m of pendientes) {
+    const objetivo = Math.abs(m.importe);
+    const matches = cands.filter(c => !usadas.has(c.clave) && Math.abs(c.importe - objetivo) < 0.005);
+    if (matches.length === 1) {
+      const c = matches[0];
+      try {
+        const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+          body: JSON.stringify({ id: m.id, facturas: [{ serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente }] })
+        });
+        if ((await r.json()).ok) { hechos++; usadas.add(c.clave); }
+      } catch(e) { /* seguir con el resto */ }
+    } else if (matches.length > 1) {
+      dudosos++;
+    }
+  }
+  btn.disabled = false;
+  alert('⚡ Autoconciliación:\n· ' + hechos + ' movimiento(s) conciliado(s)\n· ' + dudosos +
+        ' con varias facturas candidatas (revísalos a mano)\n· ' +
+        (pendientes.length - hechos - dudosos) + ' sin pareja de importe exacto');
+  bkCargar();
 }
 
 function bkCerrarModal() {
