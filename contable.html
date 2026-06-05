@@ -2313,9 +2313,12 @@ async function bkRemesas() {
       const facts = m.conciliado || [];
       const sumF = facts.reduce((s, f) => s + (f.importe || 0), 0);
       const resto = m.importe - sumF;
+      const esPropuesta = facts.some(f => f.origen === 'propuesta');
       const estado = facts.length
-        ? (Math.abs(resto) < 0.01 ? '<span style="color:#1b7a3d;font-weight:700">✓ desglosada</span>'
-                                   : '<span style="color:#c96a10;font-weight:700">⚠ quedan ' + bkFmt(resto) + ' sin explicar</span>')
+        ? (Math.abs(resto) < 0.01
+            ? (esPropuesta ? '<span style="color:#b45309;font-weight:700">🧮 cuadre propuesto</span>'
+                           : '<span style="color:#1b7a3d;font-weight:700">✓ desglosada</span>')
+            : '<span style="color:#c96a10;font-weight:700">⚠ quedan ' + bkFmt(resto) + ' sin explicar</span>')
         : '<span style="color:#c0392b;font-weight:700">⏳ sin desglosar</span>';
       const detalle = facts.length
         ? '<table style="width:100%;font-size:12px;margin-top:6px"><tr style="color:var(--texto-suave)"><th style="text-align:left">Factura</th><th style="text-align:left">Cliente</th><th style="text-align:right">Importe</th></tr>' +
@@ -2328,7 +2331,10 @@ async function bkRemesas() {
               (f.cliente || '—') + (dev ? ' ↩ DEVUELTO' : '') +
               '</td><td style="text-align:right">' + bkFmt(f.importe) + '</td></tr>';
           }).join('') + '</table>'
-        : '<div style="font-size:12px;color:var(--texto-suave);margin-top:6px">Sin desglosar — súbeme el listado del banco con 📎 (PDF de Bankinter o TXT del Sabadell).</div>';
+        : '<div style="font-size:12px;color:var(--texto-suave);margin-top:6px">Sin desglosar — súbeme el listado del banco con 📎 (PDF de Bankinter o TXT del Sabadell). ' +
+          '<button onclick="remesaProponerCuadre(' + m.id + ')" style="margin-left:8px;padding:4px 10px;background:#fff3e0;border:1.5px solid #e8b27a;color:#b45309;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🧮 Proponer cuadre</button>' +
+          '<button onclick="remesaCerrarSinDesglose(' + m.id + ',' + m.importe + ')" style="margin-left:6px;padding:4px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:6px;font-size:11px;cursor:pointer">✓ Cerrar sin desglose</button>' +
+          ' <span style="font-size:11px">(🧮 = facturas cobradas por Recibo Bancario en Ágora, fechas cercanas y suma exacta — tú confirmas viendo los nombres)</span></div>';
       return '<details style="border:1px solid #e4e8f3;border-radius:8px;padding:8px 12px;margin-bottom:6px">' +
         '<summary style="cursor:pointer;display:flex;gap:10px;align-items:center;font-size:12.5px;flex-wrap:wrap">' +
         '<b>' + (m.fecha || '—') + '</b><span style="color:var(--texto-suave)">' + (m.banco || '') + '</span>' +
@@ -2462,6 +2468,59 @@ async function remesasImportarPDF(files) {
   alert('📎 Importación de remesas:\n\n' + resumen.join('\n') +
     '\n\nConsejo: carga antes las facturas del período en la pestaña Facturas para que case recibos con facturas.');
   bkRemesas();
+}
+
+// Propone un cuadre PLAUSIBLE de la remesa: facturas con pago "Recibo Bancario" en Ágora,
+// fecha en los 60 días previos al abono y suma exacta. Tú lo revisas y confirmas — nada automático.
+async function remesaProponerCuadre(id) {
+  const m = (bkRemesasDatos.remesas || []).find(x => x.id === id);
+  if (!m) { alert('No encuentro la remesa — recarga con ⟳.'); return; }
+
+  // Facturas ya usadas en cualquier conciliación
+  let usadas = new Set();
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    ((await r.json()).movimientos || []).forEach(x => (x.conciliado || []).forEach(f => usadas.add(f.serie + '-' + f.numero)));
+  } catch(e) { alert('Error: ' + e.message); return; }
+
+  const desde = new Date(new Date(m.fecha) - 60 * 86400000).toISOString().slice(0, 10);
+  const pool = bkCandidatos({ importe: 1 }).filter(c =>
+    c.recibo && !usadas.has(c.clave) && c.fecha && c.fecha <= m.fecha && c.fecha >= desde);
+  if (!pool.length) {
+    alert('No hay facturas cobradas por Recibo Bancario en los 60 días previos (' + desde + ' → ' + m.fecha + ').\n¿Has cargado ese período en la pestaña Facturas?');
+    return;
+  }
+  const sol = bkBuscarDesglose(pool, m.importe);
+  if (!sol || !sol.length) {
+    alert('No encuentro ninguna combinación de facturas-recibo que sume ' + bkFmt(m.importe) + ' exacto.\n' +
+      'Puede haber recibos de facturas más antiguas, devoluciones incluidas en el neto, o algún cobro marcado con otro método de pago en Ágora (error humano).\n' +
+      'Para esta, mejor el listado del banco (📎) o ✓ cerrar sin desglose.');
+    return;
+  }
+  const lineas = sol.map(c => '· ' + c.clave + ' — ' + (c.cliente || '¿?') + ' — ' + bkFmt(c.importe)).join('\n');
+  if (!confirm('🧮 PROPUESTA de cuadre (' + sol.length + ' facturas, suma exacta ' + bkFmt(m.importe) + '):\n\n' + lineas +
+    '\n\n⚠ Es una reconstrucción plausible, NO verificada con el banco. ¿Los clientes te cuadran con esta remesa?\n\nAceptar = conciliar así · Cancelar = no tocar nada')) return;
+  try {
+    const r2 = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: id, facturas: sol.map(c => ({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente, situacion: 'abonado', origen: 'propuesta' })) })
+    });
+    if ((await r2.json()).ok) bkRemesas(); else alert('✗ No se pudo guardar');
+  } catch(e) { alert('✗ ' + e.message); }
+}
+
+// Concilia una remesa por su total cuando el banco ya no ofrece el detalle de adeudos
+async function remesaCerrarSinDesglose(id, importe) {
+  if (!confirm('¿Cerrar esta remesa sin desglose?\nQueda conciliada por el total (' + bkFmt(importe) + ') y fuera de pendientes.\nSi algún día consigues el listado del banco, súbelo con 📎 y sustituirá este cierre.')) return;
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: id, facturas: [{ serie: 'REMESA', numero: 'sin desglose', importe: importe, cliente: '(detalle no disponible en el banco)', situacion: 'abonado' }] })
+    });
+    if ((await r.json()).ok) bkRemesas(); else alert('✗ No se pudo guardar');
+  } catch(e) { alert('✗ ' + e.message); }
 }
 
 // Deshace los desgloses inventados por el antiguo autoconciliar (combinaciones por suma).
