@@ -627,6 +627,8 @@
         </div>
       </div>
 
+      <div id="bk-categorias" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px"></div>
+
       <div class="card" style="margin-bottom:16px">
         <div class="card-title">Importar extracto bancario</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
@@ -673,10 +675,17 @@
             <select id="bk-filtro-estado" onchange="bkCargar()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit">
               <option value="pendiente" selected>⏳ Pendientes</option>
               <option value="conciliado">✅ Conciliados</option>
+              <option value="categorizado">🏷 Categorizados (todos)</option>
+              <option value="cat:nominas">👥 Nóminas</option>
+              <option value="cat:impuestos">🏛 Impuestos (AEAT/IRPF)</option>
+              <option value="cat:seg_social">🧾 Seg. Social / Autónomos</option>
+              <option value="cat:comisiones">🏦 Comisiones bancarias</option>
+              <option value="cat:aportaciones">💼 Aportaciones</option>
               <option value="">Todos</option>
             </select>
             <input type="text" id="bk-buscar" oninput="bkRender()" placeholder="Buscar concepto..."
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px"/>
+            <button onclick="bkCategorizar()" id="bk-cat" title="Clasificar nóminas, impuestos, comisiones, SS y aportaciones" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🏷 Categorizar</button>
             <button onclick="bkAutoconciliar()" id="bk-auto" title="Conciliar automáticamente los movimientos con factura de importe exacto" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">⚡ Autoconciliar</button>
             <button onclick="bkCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
           </span>
@@ -941,7 +950,7 @@ async function cargarDatos() {
         const dia = batch[idx];
         // Facturas y tickets (todas las series de venta)
         if (r.Invoices && Array.isArray(r.Invoices)) {
-          const facts = r.Invoices.filter(f => SERIES_FACTURAS.includes(f.Serie));
+          const facts = r.Invoices;  // todas las series — también las antiguas
           facts.forEach(f => { f._tipo = 'factura'; todasFacturasC.push(f); });
           if (facts.length) factPorDia[dia] = (factPorDia[dia] || []).concat(facts);
         }
@@ -1321,7 +1330,7 @@ async function cargarMesCalendarioSiNecesario() {
         results.forEach((r, idx) => {
           const dia = batch[idx];
           if (r.Invoices && Array.isArray(r.Invoices)) {
-            const facts = r.Invoices.filter(f => SERIES_FACTURAS.includes(f.Serie) && f.Status !== 'Cancelled');
+            const facts = r.Invoices.filter(f => f.Status !== 'Cancelled');  // todas las series
             facts.forEach(f => { f._tipo = 'factura'; todasFacturasC.push(f); });
             if (facts.length) factPorDia[dia] = (factPorDia[dia] || []).concat(facts);
           }
@@ -1796,13 +1805,17 @@ async function bkImportar() {
   lector.readAsText(file, 'ISO-8859-1');  // los N43 españoles van en latin-1
 }
 
+const BK_CATS = { nominas: '👥 Nóminas', impuestos: '🏛 Impuestos', seg_social: '🧾 Seg.Social/Autón.', comisiones: '🏦 Comisiones', aportaciones: '💼 Aportaciones' };
+
 async function bkCargar() {
-  const estado = document.getElementById('bk-filtro-estado').value;
+  let estado = document.getElementById('bk-filtro-estado').value;
+  let categoria = '';
+  if (estado.startsWith('cat:')) { categoria = estado.slice(4); estado = 'categorizado'; }
   const listEl = document.getElementById('bk-lista');
   listEl.innerHTML = '<div style="color:var(--texto-suave);font-size:13px"><span class="spinner"></span>Cargando movimientos...</div>';
   try {
     const [rMov, rRes] = await Promise.all([
-      fetch(BRIDGE_URL_C + '/banco/movimientos' + (estado ? '?estado=' + estado : ''), { headers: { 'ngrok-skip-browser-warning': 'true' } }),
+      fetch(BRIDGE_URL_C + '/banco/movimientos?estado=' + estado + (categoria ? '&categoria=' + categoria : ''), { headers: { 'ngrok-skip-browser-warning': 'true' } }),
       fetch(BRIDGE_URL_C + '/banco/resumen', { headers: { 'ngrok-skip-browser-warning': 'true' } })
     ]);
     bkMovs = (await rMov.json()).movimientos || [];
@@ -1811,6 +1824,13 @@ async function bkCargar() {
     document.getElementById('bk-kpi-abonos').textContent = bkFmt(res.abonos_pendientes);
     document.getElementById('bk-kpi-cargos').textContent = bkFmt(Math.abs(res.cargos_pendientes || 0));
     document.getElementById('bk-kpi-rango').textContent = (res.primera_fecha && res.ultima_fecha) ? res.primera_fecha + ' → ' + res.ultima_fecha : '';
+    const catsEl = document.getElementById('bk-categorias');
+    if (catsEl) {
+      const cats = res.categorias || [];
+      catsEl.innerHTML = cats.length
+        ? cats.map(c => '<span style="background:#f0f4fb;border:1px solid #c0cbea;border-radius:8px;padding:4px 10px;font-size:12px"><b>' + (BK_CATS[c.categoria] || c.categoria) + '</b>: ' + c.n + ' movs · ' + bkFmt(c.suma) + '</span>').join(' ')
+        : '<span style="font-size:12px;color:var(--texto-suave)">Sin movimientos categorizados — pulsa 🏷 Categorizar.</span>';
+    }
     if (!Object.keys(pvDatos).length) pvCargarDatos(new Date().getFullYear());
     bkRender();
   } catch(e) {
@@ -1831,6 +1851,7 @@ function bkRender() {
       const badge = conc
         ? '<span style="background:#e8f7ef;color:#1a7a3f;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">✅ ' + conc.map(f => f.serie + '-' + f.numero).join(', ') + '</span>'
         : '<span style="background:#fff4e0;color:#c96a10;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">⏳ Pendiente</span>';
+      const catBadge = m.categoria ? ' <span style="background:#e0f2fe;color:#0e7490;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700">🏷 ' + (BK_CATS[m.categoria] || m.categoria) + '</span>' : '';
       const acciones = conc
         ? '<button onclick="bkDesconciliar(' + m.id + ')" style="padding:4px 10px;background:#fde8e8;border:1.5px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">✕ Deshacer</button>'
         : '<button onclick="bkAbrirConciliar(' + m.id + ')" style="padding:4px 10px;background:#1a2e6e;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🔗 Conciliar</button>';
@@ -1839,7 +1860,7 @@ function bkRender() {
         '<td style="white-space:nowrap">' + (m.banco || '—') + '</td>' +
         '<td style="max-width:340px">' + (m.concepto || '—') + '</td>' +
         '<td style="text-align:right;font-weight:800;white-space:nowrap;color:' + (m.importe >= 0 ? '#1a7a3f' : '#c0392b') + '">' + bkFmt(m.importe) + '</td>' +
-        '<td>' + badge + '</td><td style="text-align:right">' + acciones + '</td></tr>';
+        '<td>' + badge + catBadge + '</td><td style="text-align:right">' + acciones + (conc ? '' : ' <button onclick="bkEtiquetar(' + m.id + ')" title="Asignar categoría" style="padding:4px 7px;background:#f0f4fb;border:1px solid #c0cbea;border-radius:6px;font-size:11px;cursor:pointer">🏷</button>') + '</td></tr>';
     }).join('') + '</table>';
 }
 
@@ -1991,6 +2012,32 @@ async function bkGuardarConciliacion() {
     bkCerrarModal();
     bkCargar();
   } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function bkCategorizar() {
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/categorizar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' }, body: '{}'
+    });
+    const d = await r.json();
+    const det = Object.entries(d.categorizados || {}).map(([k, v]) => '· ' + (BK_CATS[k] || k) + ': ' + v).join('\n');
+    alert('🏷 ' + (d.total || 0) + ' movimiento(s) categorizados:\n' + (det || '(ninguno nuevo)'));
+    bkCargar();
+  } catch(e) { alert('✗ ' + e.message); }
+}
+
+async function bkEtiquetar(id) {
+  const v = prompt('Categoría para este movimiento:\n· nominas\n· impuestos\n· seg_social\n· comisiones\n· aportaciones\n(vacío para quitar)', '');
+  if (v === null) return;
+  const limpio = v.trim().toLowerCase();
+  if (limpio && !BK_CATS[limpio]) { alert('Categoría no válida. Usa: nominas, impuestos, seg_social, comisiones o aportaciones'); return; }
+  try {
+    await fetch(BRIDGE_URL_C + '/banco/categoria', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: id, categoria: limpio })
+    });
+    bkCargar();
+  } catch(e) { alert('✗ ' + e.message); }
 }
 
 async function bkDesconciliar(id) {
