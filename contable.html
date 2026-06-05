@@ -689,6 +689,7 @@
             <select id="pv-anio" onchange="pvCargar()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit"></select>
             <input type="text" id="pv-buscar" oninput="pvRender()" placeholder="Buscar proveedor o archivo..."
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:200px"/>
+            <button onclick="pvOCR()" id="pv-ocr" title="Leer con IA las facturas escaneadas o dudosas" style="padding:6px 12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🤖 OCR IA</button>
             <button onclick="pvEscanear()" id="pv-escanear" title="Extraer importes y fechas de los PDF" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🔍 Escanear importes</button>
             <button onclick="pvCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
           </span>
@@ -1830,7 +1831,7 @@ function bkCandidatos(mov) {
   // Cargos (importe negativo) → facturas de PROVEEDOR extraídas del Dropbox
   if (mov && mov.importe < 0) {
     return Object.values(pvDatos)
-      .filter(f => f.total > 0 && (f.estado === 'ok' || f.estado === 'corregido'))
+      .filter(f => f.total > 0 && ['ok','corregido','ocr'].includes(f.estado))
       .map(f => ({
         clave: 'PROV:' + f.ruta,
         serie: 'PROV', numero: f.nombre,
@@ -2032,6 +2033,32 @@ async function pvEscanear() {
   btn.disabled = false; btn.textContent = '🔍 Escanear importes';
 }
 
+async function pvOCR() {
+  const btn = document.getElementById('pv-ocr');
+  const anio = document.getElementById('pv-anio').value || new Date().getFullYear();
+  const pendientes = Object.values(pvDatos).filter(f => ['sin_texto','dudoso','error'].includes(f.estado)).length;
+  if (!pendientes) { alert('No hay facturas pendientes de OCR. Pulsa primero "🔍 Escanear importes".'); return; }
+  if (!confirm('Se enviarán ' + Math.min(pendientes, 25) + ' factura(s) a la IA para su lectura (coste: céntimos).\n¿Continuar?')) return;
+  btn.disabled = true; btn.textContent = '🤖 Leyendo...';
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/proveedores/ocr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ anio: anio, max: 25 })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      alert('🤖 OCR completado:\n· ' + d.procesadas + ' factura(s) leída(s)\n· ' + d.fallidas + ' fallida(s)' +
+            (d.fallos && d.fallos.length ? '\n\nFallos:\n' + d.fallos.join('\n') : ''));
+      await pvCargarDatos(anio);
+      pvRender();
+    } else {
+      alert('✗ ' + (d.error || 'Error'));
+    }
+  } catch(e) { alert('✗ ' + e.message); }
+  btn.disabled = false; btn.textContent = '🤖 OCR IA';
+}
+
 async function pvCorregir(ruta) {
   const f = pvDatos[ruta] || {};
   const val = prompt('Importe total de la factura (€):', f.total || '');
@@ -2069,8 +2096,8 @@ function pvRender() {
       const ruta = anio + '/' + a.rel;
       const dat = pvDatos[ruta] || {};
       const est = dat.estado;
-      const chip = est === 'ok' || est === 'corregido'
-        ? '<span style="color:#1a7a3f;font-weight:800">' + bkFmt(dat.total) + (est === 'corregido' ? ' ✎' : '') + '</span>'
+      const chip = est === 'ok' || est === 'corregido' || est === 'ocr'
+        ? '<span style="color:#1a7a3f;font-weight:800">' + bkFmt(dat.total) + (est === 'corregido' ? ' ✎' : est === 'ocr' ? ' 🤖' : '') + '</span>'
         : est === 'sin_texto'
           ? '<span style="color:#c0392b;font-size:11px">📷 escaneo</span>'
           : est ? '<span style="color:#c96a10;font-size:11px">¿?</span>' : '';
