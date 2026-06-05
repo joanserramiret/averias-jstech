@@ -2389,15 +2389,54 @@ async function bkCategorizar() {
   } catch(e) { alert('✗ ' + e.message); }
 }
 
-async function bkEtiquetar(id) {
-  const v = prompt('Categoría para este movimiento:\n· nominas\n· impuestos\n· seg_social\n· comisiones\n· aportaciones\n(vacío para quitar)', '');
-  if (v === null) return;
-  const limpio = v.trim().toLowerCase();
-  if (limpio && !BK_CATS[limpio]) { alert('Categoría no válida. Usa: nominas, impuestos, seg_social, comisiones o aportaciones'); return; }
+function bkEtiquetar(id) {
+  const m = bkMovs.find(x => x.id === id) || {};
+  const actual = m.categoria || '';
+  // Categorías personalizadas ya usadas en otros movimientos
+  const extras = [...new Set(bkMovs.map(x => x.categoria).filter(c => c && !BK_CATS[c]))].sort();
+  const viejo = document.getElementById('bk-cat-modal');
+  if (viejo) viejo.remove();
+
+  const botonCat = (clave, nombre) =>
+    '<button onclick="bkGuardarCategoria(' + id + ',\'' + clave.replace(/'/g, "\\'") + '\')" style="display:block;width:100%;text-align:left;padding:10px 14px;margin-bottom:6px;border:2px solid ' +
+    (clave === actual ? '#e87e1a' : '#dde') + ';border-radius:8px;background:' + (clave === actual ? '#fff3e0' : '#fff') +
+    ';font-size:14px;cursor:pointer;font-family:inherit">' + nombre + (clave === actual ? ' · <b>actual</b>' : '') + '</button>';
+
+  const botones = Object.entries(BK_CATS).map(([k, n]) => botonCat(k, n)).join('') +
+    extras.map(c => botonCat(c, '🏷 ' + c)).join('');
+
+  const div = document.createElement('div');
+  div.id = 'bk-cat-modal';
+  div.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(15,31,92,.5);display:flex;align-items:center;justify-content:center';
+  div.innerHTML = '<div style="background:#fff;border-radius:14px;padding:22px;width:340px;max-height:80vh;overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.3)">' +
+    '<div style="font-weight:800;font-size:15px;color:#1a2e6e;margin-bottom:4px">¿Qué categoría le pongo?</div>' +
+    '<div style="font-size:12px;color:#888;margin-bottom:12px;max-height:48px;overflow:hidden">' + ((m.concepto || '').slice(0, 90)) + ' · <b>' + bkFmt(m.importe || 0) + '</b></div>' +
+    botones +
+    '<div style="display:flex;gap:6px;margin-top:10px">' +
+      '<input id="bk-cat-nueva" placeholder="o crea una categoría nueva..." style="flex:1;padding:9px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;font-family:inherit" onkeydown="if(event.key===\'Enter\')bkGuardarCategoriaNueva(' + id + ')"/>' +
+      '<button onclick="bkGuardarCategoriaNueva(' + id + ')" style="padding:9px 14px;background:#1a2e6e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Crear</button>' +
+    '</div>' +
+    (actual ? '<button onclick="bkGuardarCategoria(' + id + ',\'\')" style="margin-top:10px;width:100%;padding:8px;background:#fde8e8;border:1.5px solid #e0b0b0;color:#c0392b;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✕ Quitar categoría (vuelve a pendientes)</button>' : '') +
+    '<button onclick="document.getElementById(\'bk-cat-modal\').remove()" style="margin-top:10px;width:100%;padding:8px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;font-size:13px;cursor:pointer">Cancelar</button>' +
+  '</div>';
+  div.onclick = e => { if (e.target === div) div.remove(); };
+  document.body.appendChild(div);
+}
+
+function bkGuardarCategoriaNueva(id) {
+  const v = (document.getElementById('bk-cat-nueva').value || '').trim().toLowerCase();
+  if (!v) return;
+  if (v.length > 30) { alert('Nombre demasiado largo (máx. 30).'); return; }
+  bkGuardarCategoria(id, v);
+}
+
+async function bkGuardarCategoria(id, categoria) {
+  const modal = document.getElementById('bk-cat-modal');
+  if (modal) modal.remove();
   try {
     await fetch(BRIDGE_URL_C + '/banco/categoria', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-      body: JSON.stringify({ id: id, categoria: limpio })
+      body: JSON.stringify({ id: id, categoria: categoria })
     });
     bkCargar();
   } catch(e) { alert('✗ ' + e.message); }
