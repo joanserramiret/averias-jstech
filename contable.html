@@ -848,7 +848,7 @@ function cerrarSesionContable() {
 // ===== INIT =====
 function initContable() {
   try { cargarSaldos(); } catch(e) { console.warn(e); }
-  try { setPeriod('month'); } catch(e) { console.warn(e); }
+  try { setPeriod('year'); } catch(e) { console.warn(e); }  // año en curso entero: la caché del bridge lo hace ligero
   try { renderCalendar(); } catch(e) { console.warn(e); }
   try { checkConexion(); } catch(e) { console.warn(e); }
   // Auto-load data on entry
@@ -963,31 +963,41 @@ async function cargarDatos() {
   let errores = 0;
 
   try {
-    const BATCH_SIZE = 30;
-    for (let i = 0; i < dates.length; i += BATCH_SIZE) {
-      const batch = dates.slice(i, i+BATCH_SIZE);
-      const results = await Promise.all(
-        batch.map(d => agoraGetDiaC(d)
-          .catch(() => { errores++; return {}; }))
-      );
-      results.forEach((r, idx) => {
-        const dia = batch[idx];
-        // Facturas y tickets (todas las series de venta)
-        if (r.Invoices && Array.isArray(r.Invoices)) {
-          const facts = r.Invoices;  // todas las series — también las antiguas
-          facts.forEach(f => { f._tipo = 'factura'; todasFacturasC.push(f); });
-          if (facts.length) factPorDia[dia] = (factPorDia[dia] || []).concat(facts);
-        }
-        // Albaranes
-        if (r.DeliveryNotes && Array.isArray(r.DeliveryNotes)) {
-          const albs = r.DeliveryNotes.filter(a => SERIES_ALBARANES.includes(a.Serie) && a.Status !== 'Cancelled' && a.Status !== 'Processed' && a.Status !== 'Invoiced');
-          albs.forEach(a => { a._tipo = 'albaran'; todasFacturasC.push(a); });
-          if (albs.length) factPorDia[dia] = (factPorDia[dia] || []).concat(albs);
-        }
+    // 1) El bridge sincroniza su caché de Ágora (incremental: la primera vez tarda, después son segundos)
+    let quedan = 1, vueltas = 0;
+    while (quedan > 0 && vueltas < 40) {
+      const rS = await fetch(BRIDGE_URL_C + '/agora/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ desde: desde, hasta: hasta })
       });
-      statusEl.textContent = 'Cargando... ' + Math.min(i+7, dates.length) + '/' + dates.length + ' días';
-      mostrarSplash('Cargando datos contables... ' + Math.min(i+7, dates.length) + '/' + dates.length + ' días');
+      const dS = await rS.json();
+      if (!dS.ok) throw new Error(dS.error || 'Error sincronizando con Ágora');
+      quedan = dS.quedan || 0;
+      errores += dS.dias_error || 0;
+      vueltas++;
+      if (quedan > 0) {
+        statusEl.textContent = 'Sincronizando Ágora... quedan ' + quedan + ' días';
+        mostrarSplash('Sincronizando histórico de Ágora... quedan ' + quedan + ' días (solo la primera vez)');
+      }
     }
+    // 2) Todo el período de golpe desde la caché
+    mostrarSplash('Cargando datos contables...');
+    const rT = await fetch(BRIDGE_URL_C + '/agora/facturas?desde=' + desde + '&hasta=' + hasta,
+      { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const docs = (await rT.json()).documentos || [];
+    docs.forEach(doc => {
+      const dia = (doc.BusinessDay || doc.Date || '').slice(0, 10);
+      if (doc._tipo_cache === 'factura') {
+        doc._tipo = 'factura';
+        todasFacturasC.push(doc);
+        factPorDia[dia] = (factPorDia[dia] || []).concat([doc]);
+      } else if (SERIES_ALBARANES.includes(doc.Serie) && doc.Status !== 'Cancelled' && doc.Status !== 'Processed' && doc.Status !== 'Invoiced') {
+        doc._tipo = 'albaran';
+        todasFacturasC.push(doc);
+        factPorDia[dia] = (factPorDia[dia] || []).concat([doc]);
+      }
+    });
 
     todasFacturasC.sort((a,b) => new Date(b.Date) - new Date(a.Date));
     facturasFiltC = [...todasFacturasC];

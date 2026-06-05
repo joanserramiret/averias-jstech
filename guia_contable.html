@@ -44,7 +44,7 @@
 <table>
   <tr><th>Pestaña</th><th>Qué es</th></tr>
   <tr><td><b>📊 Resumen</b></td><td>Foto del día: saldos bancarios reales, ventas, cobros y desglose por método de pago.</td></tr>
-  <tr><td><b>🧾 Facturas emitidas</b></td><td>Todas las facturas de venta de Ágora. Botón <span class="btn">Cargar</span> con el período (por defecto, el año en curso). Desde aquí se suben los PDF y el resumen diario a CAJAS.</td></tr>
+  <tr><td><b>🧾 Facturas emitidas</b></td><td>Todas las facturas de venta de Ágora. <b>Al entrar se carga solo el año en curso entero</b> (tarda unos segundos; solo la primera vez del histórico tarda unos minutos). El botón <span class="btn">Cargar</span> sirve para otros períodos. Desde aquí se suben los PDF y el resumen diario a CAJAS.</td></tr>
   <tr><td><b>💶 Cartera de cobros</b></td><td>Facturas emitidas pendientes de cobro, ordenadas por antigüedad.</td></tr>
   <tr><td><b>📥 Facturas recibidas</b></td><td>Las facturas de proveedor del Dropbox (0 PROVEÏDORS), con importes leídos automáticamente, detección de duplicados y albaranes sin factura.</td></tr>
   <tr><td><b>🏦 Tesorería</b></td><td>Movimientos de Bankinter y Sabadell con conciliación. Filtra por banco o estado, ordena clicando las cabeceras y busca cualquier cosa (importe, cliente, factura, concepto).</td></tr>
@@ -54,6 +54,7 @@
 
 <h2>☀️ El día a día (5 minutos)</h2>
 <div class="card">
+  <div class="paso"><b class="n">0</b><div>Al entrar, el panel carga solo todo el año en curso (facturas, banco y saldos). No hay que pulsar nada.</div></div>
   <div class="paso"><b class="n">1</b><div><b>Tesorería</b> → <span class="btn">⟳ Sincronizar ahora</span> (entran los movimientos nuevos del banco).</div></div>
   <div class="paso"><b class="n">2</b><div><span class="btn">🏷 Categorizar</span> — nóminas, impuestos, comisiones y Seg. Social se etiquetan solos y salen de pendientes.</div></div>
   <div class="paso"><b class="n">3</b><div><span class="btn">⚡ Conciliación automática</span> — casa cobros y pagos con sus facturas por importe y nombre de cliente.</div></div>
