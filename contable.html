@@ -689,6 +689,8 @@
             <select id="pv-anio" onchange="pvCargar()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit"></select>
             <input type="text" id="pv-buscar" oninput="pvRender()" placeholder="Buscar proveedor o archivo..."
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:200px"/>
+            <button onclick="pvCorreo()" id="pv-correo" title="Buscar facturas PDF en el correo (Outlook + Webempresa) y dejarlas en el cajón IA" style="padding:6px 12px;background:#1a7a3f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📧 Facturas del correo</button>
+            <button onclick="pvOrdenarCajon()" id="pv-cajon" title="Ordenar las facturas del cajón desastre IA en sus meses" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🗂 Ordenar cajón IA</button>
             <button onclick="pvBorrarDuplicados()" id="pv-dup" title="Eliminar del Dropbox los PDF duplicados (se conserva el original)" style="padding:6px 12px;background:#c0392b;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🧹 Duplicados</button>
             <button onclick="pvOCR()" id="pv-ocr" title="Leer con IA las facturas escaneadas o dudosas" style="padding:6px 12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🤖 OCR IA</button>
             <button onclick="pvEscanear()" id="pv-escanear" title="Extraer importes y fechas de los PDF" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🔍 Escanear importes</button>
@@ -2084,6 +2086,52 @@ async function pvEscanear() {
     }
   } catch(e) { alert('✗ ' + e.message); }
   btn.disabled = false; btn.textContent = '🔍 Escanear importes';
+}
+
+async function pvCorreo() {
+  const btn = document.getElementById('pv-correo');
+  const desde = prompt('¿Desde qué fecha busco facturas en el correo? (AAAA-MM-DD)', '2026-01-01');
+  if (!desde) return;
+  btn.disabled = true; btn.textContent = '📧 Buscando...';
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/correo/extraer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ desde: desde })
+    });
+    const d = await r.json();
+    if (!d.ok) { alert('✗ ' + (d.error || 'Error')); btn.disabled = false; btn.textContent = '📧 Facturas del correo'; return; }
+    const fmt = x => x ? (x.error ? '⚠ ' + x.error : '✓ ' + x.pdfs + ' PDF(s) de ' + x.mensajes + ' correo(s)') : '—';
+    const seguir = confirm('📧 Extracción al cajón IA:\n· Outlook: ' + fmt(d.outlook) + '\n· Webempresa: ' + fmt(d.imap) +
+                           '\n\n¿Ordenar ahora el cajón? (cada factura a su mes, duplicadas fuera)');
+    if (seguir) { btn.disabled = false; btn.textContent = '📧 Facturas del correo'; pvOrdenarCajon(); return; }
+  } catch(e) { alert('✗ ' + e.message); }
+  btn.disabled = false; btn.textContent = '📧 Facturas del correo';
+}
+
+async function pvOrdenarCajon() {
+  const btn = document.getElementById('pv-cajon');
+  if (!confirm('Se ordenarán los PDFs del "cajón desastre IA":\n· cada factura a su mes → PDTE CONTABILITZAR\n· duplicadas → carpeta PARA BORRAR\n· sin fecha clara → se quedan en el cajón\n\n(Usa OCR con IA si hace falta — céntimos)\n¿Continuar?')) return;
+  btn.disabled = true; btn.textContent = '🗂 Ordenando...';
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/proveedores/ordenar_cajon', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: '{}'
+    });
+    const d = await r.json();
+    if (d.ok) {
+      const det = (d.colocadas || []).slice(0, 12).map(c => '· ' + c.archivo + ' → ' + c.destino).join('\n');
+      alert('🗂 Cajón ordenado:\n· ' + d.colocadas.length + ' colocada(s)\n· ' + d.duplicadas.length +
+            ' duplicada(s) → PARA BORRAR\n· ' + d.sin_fecha.length + ' sin fecha (siguen en el cajón)' +
+            (d.no_pdf.length ? '\n· ' + d.no_pdf.length + ' no-PDF ignorado(s)' : '') +
+            (det ? '\n\n' + det + (d.colocadas.length > 12 ? '\n...' : '') : ''));
+      pvCargar();
+    } else {
+      alert('✗ ' + (d.error || 'Error'));
+    }
+  } catch(e) { alert('✗ ' + e.message); }
+  btn.disabled = false; btn.textContent = '🗂 Ordenar cajón IA';
 }
 
 async function pvBorrarDuplicados() {
