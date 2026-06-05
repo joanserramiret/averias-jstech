@@ -664,6 +664,13 @@ async function doLoginContable() {
       u.Name && u.Name.toLowerCase() === user.toLowerCase() &&
       (u.Password === pass || u.SmartphonePassword === pass)
     );
+    // Panel contable: SOLO perfiles de administrador
+    if (found && (((found.Profile || '') + '').toLowerCase().indexOf('admin') === -1)) {
+      err.textContent = 'Tu perfil no tiene acceso a este panel.';
+      document.getElementById('login-pass').value = '';
+      btn.disabled = false; btn.textContent = 'Acceder al panel →';
+      return;
+    }
     if (found) {
       document.getElementById('login-screen').style.display = 'none';
       document.getElementById('app').style.display = 'flex';
