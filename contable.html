@@ -1081,9 +1081,31 @@ function calcularAnuladas() {
       Math.abs(new Date((b.Date || '').slice(0, 10)) - new Date(fechaD)));
     const hermana = candidatas[0];
     usadas.add(hermana);
-    fcAnuladas.add((hermana.Serie + '-' + hermana.Number).toUpperCase());
-    fcAnuladas.add((d.Serie + '-' + d.Number).toUpperCase());
+    fcAnuladas.add(bkNormClave(hermana.Serie + '-' + hermana.Number));
+    fcAnuladas.add(bkNormClave(d.Serie + '-' + d.Number));
   });
+}
+
+// CLAVE NORMALIZADA de factura: quita ceros a la izquierda del número, porque el banco
+// escribe 'F-007490' y Ágora 'F-7490' — SON LA MISMA FACTURA. Sin esto, una factura
+// cobrada en remesa seguía saliendo como pendiente (y reclamar a quien ya pagó es sagrado).
+function bkNormClave(s) {
+  const m = String(s || '').toUpperCase().match(/^([A-Z]+)\s*-?\s*0*(\d+)$/);
+  return m ? m[1] + '-' + m[2] : String(s || '').toUpperCase().trim();
+}
+
+// Claves (normalizadas) de una lista de conciliado; las entradas 'REF' del fichero del banco
+// agrupan varias facturas en un texto ("F-007736 F-007737...") → se expanden todas
+function bkClavesDeConciliado(lista) {
+  const out = [];
+  (lista || []).forEach(f => {
+    if ((f.serie || '').toUpperCase() === 'REF') {
+      (String(f.numero || '').match(/[A-Z]+\s*-?\s*\d+/gi) || []).forEach(r => out.push([bkNormClave(r), f]));
+    } else {
+      out.push([bkNormClave((f.serie || '') + '-' + (f.numero || '')), f]);
+    }
+  });
+  return out;
 }
 
 // Facturas cobradas según el BANCO: conciliadas en movimientos (y las devueltas, que vuelven a pendiente)
@@ -1093,8 +1115,7 @@ async function cargarCobradasBanco() {
     const r = await fetch(BRIDGE_URL_C + '/banco/movimientos?estado=conciliado', { headers: { 'ngrok-skip-browser-warning': 'true' } });
     const movs = (await r.json()).movimientos || [];
     const cobradas = new Set(), devueltas = new Set(), detalle = {};
-    movs.forEach(m => (m.conciliado || []).forEach(f => {
-      const k = (f.serie + '-' + f.numero).toUpperCase();
+    movs.forEach(m => bkClavesDeConciliado(m.conciliado).forEach(([k, f]) => {
       // Trazabilidad: en qué movimiento(s) está imputada cada factura
       (detalle[k] = detalle[k] || []).push({ id: m.id, fecha: m.fecha, banco: m.banco,
         concepto: m.concepto, importe: m.importe, situacion: f.situacion || 'abonado' });
@@ -1143,7 +1164,7 @@ function actualizarDashboard() {
 
     // FACTURADO NETO: ventas menos devoluciones. Las devoluciones (FD, D...) vienen con importe
     // NEGATIVO y deben RESTAR del facturado (antes se excluían y por eso mentía).
-    const anulada = fcAnuladas.has((f.Serie + '-' + f.Number).toUpperCase());
+    const anulada = fcAnuladas.has(bkNormClave(f.Serie + '-' + f.Number));
     totalAnio += t;
     if (mesF === mesActual) totalMes += t;
     if (t > 0 && !anulada) { nAnio++; if (mesF === mesActual) nMes++; }  // ni devoluciones ni anuladas
@@ -1153,7 +1174,7 @@ function actualizarDashboard() {
 
     const pagos = f.Payments || [];
     const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
-    const clave = (f.Serie + '-' + f.Number).toUpperCase();
+    const clave = bkNormClave(f.Serie + '-' + f.Number);
     let esCobrada;
     if (banco) {
       // COBRADA = casada con el banco (transferencia o remesa). Un recibo devuelto la deja
@@ -1233,7 +1254,7 @@ function filtrarFacturasC() {
     const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
     // Misma verdad bancaria que el dashboard, para que los números cuadren entre vistas
     const bancoF = (bkCobradasBanco && bkCobradasBanco.cobradas) ? bkCobradasBanco : null;
-    const clave = (f.Serie + '-' + f.Number).toUpperCase();
+    const clave = bkNormClave(f.Serie + '-' + f.Number);
     let esPagada;
     if (bancoF) {
       esPagada = bancoF.cobradas.has(clave);  // un cobro válido posterior mata la devolución
@@ -1260,7 +1281,7 @@ function filtrarFacturasC() {
 function verImputacion(idx) {
   const f = facturasFiltC[idx];
   if (!f) return;
-  const clave = (f.Serie + '-' + f.Number).toUpperCase();
+  const clave = bkNormClave(f.Serie + '-' + f.Number);
   const det = (bkCobradasBanco && bkCobradasBanco.detalle && bkCobradasBanco.detalle[clave]) || [];
   if (!det.length) { alert('No encuentro la imputación de esta factura — recarga la página.'); return; }
   const viejo = document.getElementById('imp-modal');
@@ -1292,14 +1313,23 @@ function verImputacion(idx) {
 async function quitarImputacion(movId, idx) {
   const f = facturasFiltC[idx];
   if (!f) return;
-  const clave = (f.Serie + '-' + f.Number).toUpperCase();
+  const clave = bkNormClave(f.Serie + '-' + f.Number);
   if (!confirm('¿Quitar ' + f.Serie + '-' + f.Number + ' de este movimiento?\nEl resto del desglose del movimiento se conserva; la factura vuelve a pendiente (o a su otro cobro si lo tiene).')) return;
   try {
     const r = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
     const movs = (await r.json()).movimientos || [];
     const m = movs.find(x => x.id === movId);
     if (!m) { alert('No encuentro el movimiento.'); return; }
-    const nueva = (m.conciliado || []).filter(x => (x.serie + '-' + x.numero).toUpperCase() !== clave);
+    // Protección: si la factura está dentro de un grupo del fichero del banco (entrada REF
+    // con varias facturas), no se puede quitar individualmente sin romper el grupo
+    const enGrupo = (m.conciliado || []).some(x => (x.serie || '').toUpperCase() === 'REF' &&
+      bkClavesDeConciliado([x]).some(([k]) => k === clave) && bkClavesDeConciliado([x]).length > 1);
+    if (enGrupo) {
+      alert('Esta factura forma parte de un grupo importado del fichero del banco.\n' +
+        'Para modificarlo: ✕ Deshacer el desglose de la remesa y re-importar el fichero (📎), o usar ✏ si fue manual.');
+      return;
+    }
+    const nueva = (m.conciliado || []).filter(x => !bkClavesDeConciliado([x]).some(([k]) => k === clave));
     const r2 = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
@@ -1459,7 +1489,7 @@ function renderTablaFacturas() {
     // MISMA verdad bancaria que filtros y dashboard: cobrada = conciliada (transfer o remesa);
     // un recibo devuelto la deja pendiente hasta que un nuevo cobro la mata.
     const bancoT = (bkCobradasBanco && bkCobradasBanco.cobradas) ? bkCobradasBanco : null;
-    const claveT = (f.Serie + '-' + f.Number).toUpperCase();
+    const claveT = bkNormClave(f.Serie + '-' + f.Number);
     let esPagada, esDevuelta = false;
     if (bancoT) {
       esPagada = bancoT.cobradas.has(claveT);
@@ -1903,12 +1933,12 @@ function actualizarCobros() {
     if (/^(T|TD|D)$/i.test(f.Serie || '')) return false;  // tickets simplificados: fuera de la cartera
     const t = f.Totals ? f.Totals.GrossAmount : 0;
     if (t <= 0) return false;  // devoluciones: no se cobran
-    if (fcAnuladas.has((f.Serie + '-' + f.Number).toUpperCase())) return false;  // anuladas con su hermana
+    if (fcAnuladas.has(bkNormClave(f.Serie + '-' + f.Number))) return false;  // anuladas con su hermana
     const pagos = f.Payments || [];
     const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
     if (banco) {
       // Verdad bancaria: devuelta = pendiente; cobrada = SOLO conciliada en banco (transfer o remesa)
-      const clave = (f.Serie + '-' + f.Number).toUpperCase();
+      const clave = bkNormClave(f.Serie + '-' + f.Number);
       return !banco.cobradas.has(clave);  // devuelta sin recobro = pendiente; recobrada = fuera
     }
     if (f.Status && (f.Status === 'Closed' || f.Status === 'Processed' || f.Status.toLowerCase().includes('paid'))) return false;
@@ -1932,7 +1962,7 @@ function actualizarCobros() {
     const g = porCliente[cli] = porCliente[cli] || { total: 0, maxDias: 0, facts: [] };
     g.total += t;
     g.maxDias = Math.max(g.maxDias, dias);
-    const clave = (f.Serie + '-' + f.Number).toUpperCase();
+    const clave = bkNormClave(f.Serie + '-' + f.Number);
     g.facts.push({ num: f.Serie + '-' + f.Number, fecha: (f.Date || '').slice(0, 10), total: t, dias: dias,
                    devuelta: !!(banco && banco.devueltas.has(clave)) });
   });
@@ -2384,9 +2414,9 @@ async function bkCargar() {
       fetch(BRIDGE_URL_C + '/banco/resumen', { headers: { 'ngrok-skip-browser-warning': 'true' } })
     ]);
     bkMovs = (await rMov.json()).movimientos || [];
-    // Facturas ya usadas en CUALQUIER conciliación (para no ofrecerlas otra vez)
+    // Facturas ya usadas en CUALQUIER conciliación (claves normalizadas, grupos REF expandidos)
     bkUsadas = new Set();
-    bkMovs.forEach(m => (m.conciliado || []).forEach(f => bkUsadas.add((f.serie + '-' + f.numero).toUpperCase())));
+    bkMovs.forEach(m => bkClavesDeConciliado(m.conciliado).forEach(([k]) => bkUsadas.add(k)));
     bkActualizarBancos();
     const res = await rRes.json();
     // Cuadre = % de movimientos explicados (conciliados con documento o categorizados)
@@ -2598,10 +2628,10 @@ function bkCandidatos(mov) {
         fecha: (f.Date || '').slice(0, 10),
         importe: f.Totals.GrossAmount,
         cliente: (f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '') +
-                 (dev.has((f.Serie + '-' + f.Number).toUpperCase()) ? ' ↩ devuelta en remesa' : '')
+                 (dev.has(bkNormClave(f.Serie + '-' + f.Number)) ? ' ↩ devuelta en remesa' : '')
       }))
-      .sort((a, b) => (dev.has((b.serie + '-' + b.numero).toUpperCase()) ? 1 : 0) -
-                      (dev.has((a.serie + '-' + a.numero).toUpperCase()) ? 1 : 0));
+      .sort((a, b) => (dev.has(bkNormClave(b.serie + '-' + b.numero)) ? 1 : 0) -
+                      (dev.has(bkNormClave(a.serie + '-' + a.numero)) ? 1 : 0));
   }
   // Cargos (importe negativo) → facturas de PROVEEDOR extraídas del Dropbox
   if (mov && mov.importe < 0) {
@@ -2662,7 +2692,7 @@ function bkModalRender() {
   // EXCEPCIÓN: en una devolución de recibo, la factura está conciliada en su remesa — debe verse.
   const totalCands = cands.length;
   if (!bkEsDevolCliente(bkMovActual)) {
-    cands = cands.filter(c => !bkUsadas.has((c.clave || '').toUpperCase()) || bkSeleccion[c.clave]);
+    cands = cands.filter(c => !bkUsadas.has(bkNormClave(c.clave)) || bkSeleccion[c.clave]);
   }
   const ocultadas = totalCands - cands.length;
   if (!cands.length) {
@@ -2753,7 +2783,7 @@ let bkSoloSeleccion = false;  // tras una propuesta, el modal muestra solo lo pr
 function bkDesgloseModal() {
   if (!bkMovActual) return;
   const usadas = new Set(Object.keys(bkSeleccion));
-  const base = bkCandidatos(bkMovActual).filter(c => !usadas.has(c.clave));
+  const base = bkCandidatos(bkMovActual).filter(c => !usadas.has(bkNormClave(c.clave)));
   const objetivo = Math.abs(bkMovActual.importe) - Object.values(bkSeleccion).reduce((s, c) => s + c.importe, 0);
   // Mismas rejas que el 🧮 de Remesas: solo facturas reales cobradas por Recibo Bancario,
   // y ventanas de fecha crecientes (25 → 45 → 90 días antes del abono)
@@ -2889,7 +2919,7 @@ async function bkAutoconciliar() {
   try {
     const rTodos = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
     ((await rTodos.json()).movimientos || []).forEach(m => {
-      (m.conciliado || []).forEach(f => usadas.add(f.serie + '-' + f.numero));
+      bkClavesDeConciliado(m.conciliado).forEach(([k]) => usadas.add(k));
     });
   } catch(e) { alert('Error consultando movimientos: ' + e.message); return; }
 
@@ -2911,7 +2941,7 @@ async function bkAutoconciliar() {
   let hechos = 0, dudosos = 0, remesas = 0, porNombre = 0, porGrupo = 0;
   for (const m of pendientes) {
     const objetivo = Math.abs(m.importe);
-    const libres = bkCandidatos(m).filter(c => !usadas.has(c.clave));
+    const libres = bkCandidatos(m).filter(c => !usadas.has(bkNormClave(c.clave)));
     const matches = libres.filter(c => Math.abs(c.importe - objetivo) < 0.01);
     let facturasElegidas = null;
     if (matches.length === 1) {
@@ -3019,6 +3049,7 @@ async function bkRemesas() {
               '</td><td style="text-align:right">' + bkFmt(f.importe) + '</td></tr>';
           }).join('') + '</table>' +
           '<div style="text-align:right;margin-top:6px">' +
+          (facts.some(x => x.serie === '—') ? '<button onclick="remesaDeducir(' + m.id + ')" title="Deducir las facturas de los recibos sin localizar, por cliente e importes" style="padding:4px 10px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px">🪄 Deducir facturas</button>' : '') +
           (esPropuesta ? '<button onclick="remesaEditarCuadre(' + m.id + ')" title="Editar el cuadre manual: añadir o quitar facturas" style="padding:4px 10px;background:#fff3e0;border:1px solid #e8b27a;color:#b45309;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px">✏ Editar cuadre</button>' : '') +
           '<button onclick="remesaDeshacer(' + m.id + ')" title="Deshacer este desglose: el movimiento vuelve a pendientes y las facturas quedan libres" style="padding:4px 10px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;cursor:pointer">✕ Deshacer desglose</button></div>'
         : '<div style="font-size:12px;color:var(--texto-suave);margin-top:6px">Sin desglosar — súbeme el listado del banco con 📎 (PDF de Bankinter o TXT del Sabadell). ' +
@@ -3118,31 +3149,60 @@ async function remesasImportarPDF(files) {
     const usadasLoc = new Set();
     const entradas = [];
     let conFactura = 0, devueltos = 0;
+    // 🪄 deducción por cliente: facturas del deudor (por nombre) que sumen el importe del recibo
+    const magiaCliente = (rec, objetivo) => {
+      const grupo = cands.filter(c => !usadasLoc.has(c.clave) &&
+        (bkNombreEnConcepto(c.cliente, rec.deudor) || bkNombreEnConcepto(rec.deudor, c.cliente)));
+      if (!grupo.length) return null;
+      const exactas = grupo.filter(c => Math.abs(c.importe - objetivo) < 0.01);
+      if (exactas.length === 1) return [exactas[0]];
+      return bkBuscarDesglose(grupo, objetivo);
+    };
     d.recibos.forEach(rec => {
       if (rec.situacion === 'devuelto') devueltos++;
-      // 1) El fichero trae las facturas exactas (Sabadell)
+      // 1) El fichero trae referencias de factura (Sabadell TXT / Bankinter TXT)
       if (rec.facturas && rec.facturas.length) {
-        const halladas = rec.facturas.map(ref => cands.find(x => x.clave === ref)).filter(Boolean);
-        if (halladas.length === rec.facturas.length) {
-          halladas.forEach(c => { usadasLoc.add(c.clave); entradas.push({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: rec.deudor, situacion: rec.situacion }); });
-          conFactura++;
-          return;
+        const halladas = rec.facturas.map(ref => cands.find(x => bkNormClave(x.clave) === bkNormClave(ref))).filter(Boolean);
+        halladas.forEach(c => { usadasLoc.add(c.clave); entradas.push({ serie: c.serie, numero: c.numero,
+          importe: halladas.length === 1 && rec.facturas.length === 1 ? rec.importe : c.importe,
+          cliente: rec.deudor, situacion: rec.situacion }); });
+        if (halladas.length) conFactura++;
+        const sumH = (halladas.length === 1 && rec.facturas.length === 1)
+          ? rec.importe
+          : halladas.reduce((s, c) => s + c.importe, 0);
+        const resto = Math.round((rec.importe - sumH) * 100) / 100;
+        if (halladas.length === rec.facturas.length && Math.abs(resto) < 0.01) return;  // perfecto
+        // Refs truncadas/typos/no cargadas o recobro +DEV+GASTOS: deducir el resto por cliente
+        if (Math.abs(resto) >= 0.01) {
+          const sol = magiaCliente(rec, resto);
+          if (sol && sol.length) {
+            sol.forEach(c => { usadasLoc.add(c.clave); entradas.push({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: rec.deudor + ' 🪄', situacion: rec.situacion }); });
+            if (!halladas.length) conFactura++;
+            return;
+          }
+          entradas.push({ serie: halladas.length ? 'GASTOS' : 'REF',
+            numero: halladas.length ? 'resto recibo (dev/gastos)' : rec.facturas.join(' '),
+            importe: resto, cliente: rec.deudor, situacion: rec.situacion });
         }
-        // referencias sin cargar: guardamos la referencia igualmente
-        entradas.push({ serie: 'REF', numero: rec.facturas.join(' '), importe: rec.importe, cliente: rec.deudor, situacion: rec.situacion });
-        conFactura++;
         return;
       }
-      // 2) Por nombre + importe exacto (Bankinter no trae números de factura)
+      // 2) Sin referencias (PDF Bankinter/Sabadell): nombre + importe exacto único
       const m1 = cands.filter(c => !usadasLoc.has(c.clave) && Math.abs(c.importe - rec.importe) < 0.01 &&
         (bkNombreEnConcepto(c.cliente, rec.deudor) || bkNombreEnConcepto(rec.deudor, c.cliente)));
       if (m1.length === 1) {
         usadasLoc.add(m1[0].clave);
         entradas.push({ serie: m1[0].serie, numero: m1[0].numero, importe: rec.importe, cliente: rec.deudor, situacion: rec.situacion });
         conFactura++;
-      } else {
-        entradas.push({ serie: '—', numero: '', importe: rec.importe, cliente: rec.deudor, situacion: rec.situacion });
+        return;
       }
+      // 3) 🪄 MAGIA: combinación de facturas del MISMO cliente que suman el recibo
+      const sol = magiaCliente(rec, rec.importe);
+      if (sol && sol.length) {
+        sol.forEach(c => { usadasLoc.add(c.clave); entradas.push({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: rec.deudor + ' 🪄', situacion: rec.situacion }); });
+        conFactura++;
+        return;
+      }
+      entradas.push({ serie: '—', numero: '', importe: rec.importe, cliente: rec.deudor, situacion: rec.situacion });
     });
 
     // Si el banco abonó el LÍQUIDO, la diferencia son comisiones/impuestos — línea propia para cuadrar al céntimo
@@ -3322,6 +3382,57 @@ async function remCuadreGuardar() {
       document.getElementById('remc-modal').remove();
       bkRemesas();
     } else alert('✗ No se pudo guardar');
+  } catch(e) { alert('✗ ' + e.message); }
+}
+
+// 🪄 Re-deducción: para los recibos '—' (sin factura localizada) de una remesa ya importada,
+// busca sus facturas por cliente e importe (exacta única o combinación que sume el recibo)
+async function remesaDeducir(id) {
+  const m = (bkRemesasDatos.remesas || []).find(x => x.id === id);
+  if (!m || !m.conciliado) return;
+  // facturas usadas en cualquier conciliación (menos las de esta remesa, normalizado)
+  let usadas = new Set();
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    ((await r.json()).movimientos || []).forEach(x => {
+      if (x.id === id) return;
+      bkClavesDeConciliado(x.conciliado).forEach(([k]) => usadas.add(k));
+    });
+  } catch(e) { alert('✗ ' + e.message); return; }
+  bkClavesDeConciliado(m.conciliado).forEach(([k]) => usadas.add(k));  // las ya asignadas aquí tampoco
+  const cands = bkCandidatos({ importe: 1 }).filter(c => !usadas.has(bkNormClave(c.clave)) &&
+    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || ''));
+  let resueltas = 0, sinResolver = [];
+  const nuevo = [];
+  m.conciliado.forEach(f => {
+    if (f.serie !== '—') { nuevo.push(f); return; }
+    const grupo = cands.filter(c => !usadas.has(bkNormClave(c.clave)) &&
+      (bkNombreEnConcepto(c.cliente, f.cliente || '') || bkNombreEnConcepto(f.cliente || '', c.cliente)));
+    const exactas = grupo.filter(c => Math.abs(c.importe - (f.importe || 0)) < 0.01);
+    const sol = exactas.length === 1 ? [exactas[0]] : bkBuscarDesglose(grupo, f.importe || 0);
+    if (sol && sol.length) {
+      sol.forEach(c => { usadas.add(bkNormClave(c.clave)); nuevo.push({ serie: c.serie, numero: c.numero,
+        importe: sol.length === 1 ? f.importe : c.importe, cliente: (f.cliente || '') + ' 🪄', situacion: f.situacion || 'abonado' }); });
+      resueltas++;
+    } else {
+      nuevo.push(f);
+      sinResolver.push((f.cliente || '¿?') + ' (' + bkFmt(f.importe || 0) + ')');
+    }
+  });
+  if (!resueltas) {
+    alert('🪄 No he podido deducir ninguna: ' + (sinResolver.length ? '\n· ' + sinResolver.join('\n· ') : '') +
+      '\n\n¿Están cargadas las facturas de ese período en la pestaña Facturas emitidas?');
+    return;
+  }
+  if (!confirm('🪄 He deducido ' + resueltas + ' recibo(s) por cliente e importe.' +
+    (sinResolver.length ? '\nSiguen sin localizar: ' + sinResolver.join(', ') : '') + '\n\n¿Guardar?')) return;
+  try {
+    const r2 = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: id, facturas: nuevo })
+    });
+    if ((await r2.json()).ok) bkRemesas(); else alert('✗ No se pudo guardar');
   } catch(e) { alert('✗ ' + e.message); }
 }
 
