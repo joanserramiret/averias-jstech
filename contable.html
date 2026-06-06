@@ -521,6 +521,7 @@
             <option value="vencida">Vencidas</option>
           </select>
           <button class="btn-secondary" onclick="descargarSeleccionadas()">⬇ Descargar seleccionadas</button>
+          <button onclick="reclamarCobroEmail()" title="Generar un email de reclamación con las facturas seleccionadas del cliente" style="padding:8px 14px;background:#b45309;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✉ Reclamar cobro</button>
           <button class="btn-naranja" onclick="subirCajasFaltantes()" title="Copia en PDF a Dropbox · CAJAS las facturas de los días que falten">📦 Subir a CAJAS (faltantes)</button>
           <button class="btn-secondary" onclick="exportarExcel()">📊 Excel</button>
         </div>
@@ -1204,6 +1205,64 @@ function filtrarFacturasC() {
   renderTablaFacturas();
 }
 
+// ✉ Reclamación de cobro: con las facturas seleccionadas de UN cliente, genera un email editable
+function reclamarCobroEmail() {
+  const marcadas = [...document.querySelectorAll('.fact-row-cb:checked')]
+    .map(cb => facturasFiltC[parseInt(cb.getAttribute('data-idx'))]).filter(Boolean);
+  if (!marcadas.length) { alert('Marca primero las facturas pendientes del cliente (casillas de la izquierda).'); return; }
+  const clientes = [...new Set(marcadas.map(f => f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : ''))];
+  if (clientes.length > 1) { alert('Has marcado facturas de ' + clientes.length + ' clientes distintos.\nLa reclamación va dirigida a UN cliente — marca solo las suyas.'); return; }
+  const cliente = clientes[0] || 'cliente';
+  const email = (marcadas[0].Customer && marcadas[0].Customer.Email) || '';
+  const hoy = new Date();
+  let total = 0;
+  const lineas = marcadas.map(f => {
+    const t = f.Totals ? f.Totals.GrossAmount : 0;
+    total += t;
+    const dias = Math.floor((hoy - new Date(f.Date)) / 86400000);
+    return '  · ' + f.Serie + '-' + f.Number + '  ·  ' + (f.Date || '').slice(0, 10) + '  ·  ' + t.toFixed(2) + ' €  (' + dias + ' días)';
+  }).join('\n');
+  const cuerpo = 'Estimado/a ' + cliente + ':\n\n' +
+    'Nos ponemos en contacto con usted en relación a las siguientes facturas que, según nuestros registros, se encuentran pendientes de cobro:\n\n' +
+    lineas + '\n\n  TOTAL PENDIENTE: ' + total.toFixed(2) + ' €\n\n' +
+    'Le agradeceríamos que regularizara el pago a la mayor brevedad posible. Si ya lo hubiera efectuado o detecta alguna discrepancia, le rogamos nos lo comunique para actualizar nuestros registros.\n\n' +
+    'Quedamos a su disposición para cualquier aclaración.\n\nUn saludo,\nJS TECHNOLOGY MENORCA S.L.';
+
+  const viejo = document.getElementById('reclamo-modal');
+  if (viejo) viejo.remove();
+  const div = document.createElement('div');
+  div.id = 'reclamo-modal';
+  div.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(15,31,92,.5);display:flex;align-items:center;justify-content:center';
+  div.innerHTML = '<div style="background:#fff;border-radius:14px;padding:22px;width:560px;max-width:94vw;max-height:88vh;overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.3)">' +
+    '<div style="font-weight:800;font-size:15px;color:#1a2e6e;margin-bottom:12px">✉ Reclamación de cobro — ' + cliente + ' (' + marcadas.length + ' fra. · ' + total.toFixed(2) + ' €)</div>' +
+    '<label style="font-size:12px;color:#888">Para:</label>' +
+    '<input id="rec-para" value="' + email.replace(/"/g, '&quot;') + '" placeholder="email del cliente" style="width:100%;padding:8px 10px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-bottom:8px;font-family:inherit"/>' +
+    '<label style="font-size:12px;color:#888">Asunto:</label>' +
+    '<input id="rec-asunto" value="Facturas pendientes de pago — JS Technology Menorca" style="width:100%;padding:8px 10px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-bottom:8px;font-family:inherit"/>' +
+    '<label style="font-size:12px;color:#888">Mensaje (editable):</label>' +
+    '<textarea id="rec-cuerpo" rows="14" style="width:100%;padding:10px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical"></textarea>' +
+    '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">' +
+      '<button onclick="reclamoEnviar()" style="flex:1;padding:10px;background:#1a2e6e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">📧 Abrir en tu correo</button>' +
+      '<button onclick="reclamoCopiar(this)" style="flex:1;padding:10px;background:#0e7490;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">📋 Copiar texto</button>' +
+      '<button onclick="document.getElementById(\'reclamo-modal\').remove()" style="padding:10px 16px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;font-size:13px;cursor:pointer">Cancelar</button>' +
+    '</div></div>';
+  div.onclick = e => { if (e.target === div) div.remove(); };
+  document.body.appendChild(div);
+  document.getElementById('rec-cuerpo').value = cuerpo;
+}
+
+function reclamoEnviar() {
+  const para = document.getElementById('rec-para').value.trim();
+  const asunto = document.getElementById('rec-asunto').value;
+  const cuerpo = document.getElementById('rec-cuerpo').value;
+  window.location.href = 'mailto:' + encodeURIComponent(para) + '?subject=' + encodeURIComponent(asunto) + '&body=' + encodeURIComponent(cuerpo);
+}
+
+function reclamoCopiar(btn) {
+  const txt = 'Para: ' + document.getElementById('rec-para').value + '\nAsunto: ' + document.getElementById('rec-asunto').value + '\n\n' + document.getElementById('rec-cuerpo').value;
+  navigator.clipboard.writeText(txt).then(() => { btn.textContent = '✓ Copiado'; setTimeout(() => { btn.textContent = '📋 Copiar texto'; }, 1500); });
+}
+
 function renderTablaFacturas() {
   const tbody = document.getElementById('fact-tbody');
   const table = document.getElementById('fact-table');
@@ -1231,14 +1290,28 @@ function renderTablaFacturas() {
     const pagos = f.Payments || [];
     const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
     const metodoPago = pagos.length ? pagos.map(p => p.MethodName || '—').join(', ') : '—';
-    const esPagada = sumPagos >= t - 0.01 || (f.Status && (f.Status === 'Closed' || f.Status === 'Processed' || f.Status.toLowerCase().includes('paid')));
-    const dias = (hoy - new Date(f.Date)) / 86400000;
+    // MISMA verdad bancaria que filtros y dashboard: cobrada = conciliada (transfer o remesa);
+    // un recibo devuelto la deja pendiente hasta que un nuevo cobro la mata.
+    const bancoT = (bkCobradasBanco && bkCobradasBanco.cobradas) ? bkCobradasBanco : null;
+    const claveT = (f.Serie + '-' + f.Number).toUpperCase();
+    let esPagada, esDevuelta = false;
+    if (bancoT) {
+      esPagada = bancoT.cobradas.has(claveT);
+      esDevuelta = !esPagada && bancoT.devueltas.has(claveT);
+    } else {
+      esPagada = sumPagos >= t - 0.01 || (f.Status && (f.Status === 'Closed' || f.Status === 'Processed' || f.Status.toLowerCase().includes('paid')));
+    }
+    const dias = Math.floor((hoy - new Date(f.Date)) / 86400000);
     const esVencida = !esPagada && dias > 30;
-    const badge = esPagada
-      ? '<span class="badge badge-pagada">Pagada</span>'
-      : esVencida
-        ? '<span class="badge badge-vencida">Vencida (' + Math.floor(dias) + 'd)</span>'
-        : '<span class="badge badge-pendiente">Pendiente</span>';
+    const badge = t <= 0
+      ? '<span class="badge" style="background:#eee;color:#666">Devolución</span>'
+      : esPagada
+        ? '<span class="badge badge-pagada">Pagada</span>'
+        : esDevuelta
+          ? '<span class="badge badge-vencida">↩ Recibo devuelto · ' + dias + 'd</span>'
+          : esVencida
+            ? '<span class="badge badge-vencida">Vencida · ' + dias + 'd</span>'
+            : '<span class="badge badge-pendiente">Pendiente · ' + dias + 'd</span>';
 
     return '<tr>' +
       '<td><input type="checkbox" class="row-cb fact-row-cb" data-idx="' + i + '" /></td>' +
