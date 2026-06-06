@@ -44,6 +44,7 @@
 <table>
   <tr><th>Pestaña</th><th>Qué es</th></tr>
   <tr><td><b>📊 Resumen</b></td><td>Foto del día: saldos bancarios reales, ventas, cobros y desglose por método de pago.</td></tr>
+  <tr><td><b>📊 Resumen</b></td><td>Foto del día: facturado del mes + acumulado del año, cobrado real (según el banco), pendiente y vencido. <b>Las tarjetas son clicables</b> y llevan a su relación.</td></tr>
   <tr><td><b>🧾 Facturas emitidas</b></td><td>Todas las facturas de venta de Ágora. <b>Al entrar se carga solo el año en curso entero</b> (tarda unos segundos; solo la primera vez del histórico tarda unos minutos). El botón <span class="btn">Cargar</span> sirve para otros períodos. Desde aquí se suben los PDF y el resumen diario a CAJAS.</td></tr>
   <tr><td><b>💶 Cartera de cobros</b></td><td>Facturas emitidas pendientes de cobro, ordenadas por antigüedad.</td></tr>
   <tr><td><b>📥 Facturas recibidas</b></td><td>Las facturas de proveedor del Dropbox (0 PROVEÏDORS), con importes leídos automáticamente, detección de duplicados y albaranes sin factura.</td></tr>
@@ -58,7 +59,11 @@
   <div class="paso"><b class="n">1</b><div><b>Tesorería</b> → <span class="btn">⟳ Sincronizar ahora</span> (entran los movimientos nuevos del banco).</div></div>
   <div class="paso"><b class="n">2</b><div><span class="btn">🏷 Categorizar</span> — nóminas, impuestos, comisiones y Seg. Social se etiquetan solos y salen de pendientes.</div></div>
   <div class="paso"><b class="n">3</b><div><span class="btn">⚡ Conciliación automática</span> — casa cobros y pagos con sus facturas por importe y nombre de cliente.</div></div>
-  <div class="paso"><b class="n">4</b><div>Lo que quede pendiente es la lista real de trabajo: botón <span class="btn">🔗 Conciliar</span> en cada movimiento para hacerlo a mano.</div></div>
+  <div class="paso"><b class="n">4</b><div>Lo que quede pendiente es la lista real de trabajo: botón <span class="btn">🔗 Conciliar</span> en cada movimiento (o <span class="btn">⇄</span> para cruzar un anticipo cobrado y devuelto, o un cargo anulado).</div></div>
+</div>
+<div class="aviso">
+  <b>El objetivo es el «cuadre», no conciliarlo todo.</b> El KPI <span class="btn">🎯 Cuadre del banco</span> mide el % de movimientos <i>explicados</i>: los cobros/pagos casan con facturas; nóminas, impuestos, comisiones, Seg. Social y traspasos se <b>categorizan</b> (su justificante no es factura) y salen de pendientes. Filtra por banco, ordena clicando las cabeceras y busca cualquier cosa (importe, cliente, factura…).<br><br>
+  <b>🧹 Duplicados</b> → si un apunte entró por el extracto N43 y por el banco a la vez, este botón quita el sobrante conservando el que ya esté trabajado.
 </div>
 
 <h2>🧩 Remesas: la fuente de la verdad es el banco</h2>
@@ -67,7 +72,8 @@
   <div class="paso"><b class="n">1</b><div>Descarga del banco el detalle: en <b>Bankinter</b> el PDF "listado de adeudos de la remesa"; en <b>Sabadell</b> el fichero TXT de la remesa (el SEPA que se presentó).</div></div>
   <div class="paso"><b class="n">2</b><div>Pestaña Remesas → <span class="btn">📎 Listado del banco (PDF)</span> → selecciona el archivo (o varios a la vez).</div></div>
   <div class="paso"><b class="n">3</b><div>La remesa queda <span class="ok">✓ desglosada</span> con cada cliente y factura; los recibos <span class="rojo">↩ DEVUELTOS</span> salen en rojo (lista de reclamación).</div></div>
-  <p>Sin fichero del banco hay dos salidas: <span class="btn">🧮 Proponer cuadre</span> (reconstrucción a partir de las facturas cobradas por recibo — queda marcada <span class="ambar">🧮 propuesta</span>, revísala antes de aceptar) o <span class="btn">✓ Cerrar sin desglose</span>. Todo tiene <span class="btn">✕ Deshacer</span>: nada es irreversible.</p>
+  <p>Sin fichero del banco hay dos salidas: <span class="btn">🧮 Proponer cuadre</span> (reconstrucción a partir de las facturas cobradas por Recibo Bancario en una ventana de 25→45→90 días antes del abono — queda marcada <span class="ambar">🧮 propuesta</span>, revísala antes de aceptar) o <span class="btn">✓ Cerrar sin desglose</span>. Todo tiene <span class="btn">✕ Deshacer</span>: nada es irreversible.</p>
+  <p>Las <b>devoluciones</b> se separan solas: <span class="rojo">↩ recibos devueltos por clientes</span> (a reclamar) y <span class="ambar">↪ recibos nuestros devueltos a proveedores</span> (ya pagados por transferencia). Los gastos de devolución que cobra el banco aparecen ligados a su remesa.</p>
 </div>
 
 <h2>📥 Facturas recibidas: trucos</h2>
@@ -76,8 +82,11 @@
   <tr><th>Quiero…</th><th>Cómo</th></tr>
   <tr><td>Leer los importes de los PDF nuevos</td><td><span class="btn">🔍 Escanear importes</span> (los corregidos a mano no se tocan)</td></tr>
   <tr><td>Corregir un importe mal leído</td><td>Clic sobre el importe de la fila → escribir el valor</td></tr>
-  <tr><td>Cambiar el tipo de un documento</td><td>Botón 🧾/📋/🔔/📦 de la fila → elegir tipo (la elección manda para siempre)</td></tr>
+  <tr><td>Cambiar el tipo de un documento</td><td>Botón 🧾/📋/🔔/📦 de la fila → selector visual (factura, albarán, aviso, otro o uno nuevo). La elección manda para siempre</td></tr>
+  <tr><td>Cambiar el tipo de varios a la vez</td><td>Casillas a la izquierda (o la de la cabecera = todo lo visible) → barra azul arriba → 🧾 Factura / 📋 Albarán…</td></tr>
   <tr><td>Quitar un PDF que se ha colado</td><td>Botón 🗑 → va a la carpeta PARA BORRAR del Dropbox (y puede aprender el patrón para apartar los futuros solos)</td></tr>
+  <tr><td>Documentos colados en el año equivocado</td><td><span class="btn">📅 Cuadrar por año</span> → mueve a su carpeta de año los que tengan fecha de otro ejercicio</td></tr>
+  <tr><td>Facturas de Movistar (llegan en HTML)</td><td>El barrido del correo las convierte a PDF solo y las deja en el cajón como las demás</td></tr>
   <tr><td>Traer facturas del correo</td><td><span class="btn">📧 Facturas del correo</span> → barre los buzones y deja los PDF en el cajón → <span class="btn">🗂 Ordenar cajón IA</span> los coloca por mes en PDTE CONTABILITZAR</td></tr>
   <tr><td>Ver albaranes sin factura posterior</td><td><span class="btn">🔎 Albaranes sin factura</span> — candidatos a reclamar al proveedor</td></tr>
 </table>
