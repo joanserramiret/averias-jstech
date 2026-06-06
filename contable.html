@@ -3672,6 +3672,21 @@ async function bkRemesas() {
   }
 
   let html = '';
+  // 🚨 Chivato: una misma factura imputada en VARIAS remesas = error (cuotas mensuales mal deducidas)
+  const vecesClave = {};
+  remesas.forEach(m => bkClavesDeConciliado(m.conciliado).forEach(([k, f]) => {
+    const s = (f.serie || '').toUpperCase();
+    if (s === 'REF' || s === 'GASTOS' || s === 'DESCUADRE') return;
+    (vecesClave[k] = vecesClave[k] || []).push(m.fecha || '¿?');
+  }));
+  const dupsRem = Object.entries(vecesClave).filter(([, v]) => v.length > 1);
+  if (dupsRem.length) {
+    html += '<div style="background:#fdf3f3;border:1.5px solid #e0b0b0;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12.5px">' +
+      '<b style="color:#c0392b">🚨 ' + dupsRem.length + ' factura(s) imputadas en VARIAS remesas a la vez</b> — imposible: cada factura se cobra una vez. ' +
+      'Despliega las remesas, deja la del mes correcto y quita las demás con ✕ (luego 🪄 o ➕ para poner la factura que toca):' +
+      dupsRem.slice(0, 10).map(([k, v]) => '<div style="margin-top:4px">· <b>' + k + '</b> en ' + v.length + ' remesas (' + v.sort().join(', ') + ')</div>').join('') +
+      (dupsRem.length > 10 ? '<div style="color:#888;margin-top:4px">…y ' + (dupsRem.length - 10) + ' más</div>' : '') + '</div>';
+  }
   if (remesas.length) {
     const total = remesas.reduce((s, m) => s + m.importe, 0);
     const desglosadas = remesas.filter(m => m.conciliado && m.conciliado.length).length;
@@ -3794,6 +3809,11 @@ async function remesasImportarPDF(files) {
     movs = (await r.json()).movimientos || [];
   } catch(e) { alert('Error consultando el banco: ' + e.message); return; }
   const cands = bkCandidatos({ importe: 1 });  // facturas de venta cargadas (si las hay)
+  // Facturas YA imputadas en cualquier movimiento — GLOBAL y compartido entre ficheros:
+  // sin esto, los clientes de cuota mensual (mismo importe cada mes, caso Sergi Yglesias)
+  // acababan con LA MISMA factura deducida en tres remesas distintas.
+  const usadasGlob = new Set();
+  movs.forEach(mm => bkClavesDeConciliado(mm.conciliado).forEach(([k]) => usadasGlob.add(k)));
   const resumen = [];
   for (const file of files) {
     let d;
@@ -3874,16 +3894,24 @@ async function remesasImportarPDF(files) {
     if (!mov) { resumen.push('✗ ' + file.name + ': no veo el abono de ' + bkFmt(d.importe) + (d.liquido ? ' (ni el líquido ' + bkFmt(d.liquido) + ')' : '') + ' (' + (d.fecha_abono || '¿fecha?') + ') en los movimientos — sincroniza ese período del banco'); continue; }
     const abonoLiquido = d.liquido && Math.abs(mov.importe - d.liquido) < 0.01 && Math.abs(d.importe - d.liquido) > 0.005;
 
-    const usadasLoc = new Set();
     const entradas = [];
     let conFactura = 0, devueltos = 0;
+    // Desempate por FECHA: entre varias facturas del mismo importe (cuota mensual),
+    // la de la remesa es la más cercana ANTERIOR a su fecha de abono
+    const fechaRem = d.fecha_abono || mov.fecha || '';
+    const masCercana = lista => lista.slice().sort((a, b) => {
+      const va = a.fecha && fechaRem ? Math.abs(new Date(fechaRem) - new Date(a.fecha)) + (a.fecha > fechaRem ? 1e12 : 0) : 9e15;
+      const vb = b.fecha && fechaRem ? Math.abs(new Date(fechaRem) - new Date(b.fecha)) + (b.fecha > fechaRem ? 1e12 : 0) : 9e15;
+      return va - vb;
+    })[0];
     // 🪄 deducción por cliente: facturas del deudor (por nombre) que sumen el importe del recibo
     const magiaCliente = (rec, objetivo) => {
-      const grupo = cands.filter(c => !usadasLoc.has(c.clave) &&
+      const grupo = cands.filter(c => !usadasGlob.has(bkNormClave(c.clave)) &&
         (bkNombreEnConcepto(c.cliente, rec.deudor) || bkNombreEnConcepto(rec.deudor, c.cliente)));
       if (!grupo.length) return null;
       const exactas = grupo.filter(c => Math.abs(c.importe - objetivo) < 0.01);
       if (exactas.length === 1) return [exactas[0]];
+      if (exactas.length > 1) return [masCercana(exactas)];  // la cuota del MES de la remesa
       return bkBuscarDesglose(grupo, objetivo);
     };
     d.recibos.forEach(rec => {
@@ -3891,7 +3919,7 @@ async function remesasImportarPDF(files) {
       // 1) El fichero trae referencias de factura (Sabadell TXT / Bankinter TXT)
       if (rec.facturas && rec.facturas.length) {
         const halladas = rec.facturas.map(ref => cands.find(x => bkNormClave(x.clave) === bkNormClave(ref))).filter(Boolean);
-        halladas.forEach(c => { usadasLoc.add(c.clave); entradas.push({ serie: c.serie, numero: c.numero,
+        halladas.forEach(c => { usadasGlob.add(bkNormClave(c.clave)); entradas.push({ serie: c.serie, numero: c.numero,
           importe: halladas.length === 1 && rec.facturas.length === 1 ? rec.importe : c.importe,
           cliente: rec.deudor, situacion: rec.situacion }); });
         if (halladas.length) conFactura++;
@@ -3904,7 +3932,7 @@ async function remesasImportarPDF(files) {
         if (Math.abs(resto) >= 0.01) {
           const sol = magiaCliente(rec, resto);
           if (sol && sol.length) {
-            sol.forEach(c => { usadasLoc.add(c.clave); entradas.push({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: rec.deudor + ' 🪄', situacion: rec.situacion }); });
+            sol.forEach(c => { usadasGlob.add(bkNormClave(c.clave)); entradas.push({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: rec.deudor + ' 🪄', situacion: rec.situacion }); });
             if (!halladas.length) conFactura++;
             return;
           }
@@ -3914,19 +3942,22 @@ async function remesasImportarPDF(files) {
         }
         return;
       }
-      // 2) Sin referencias (PDF Bankinter/Sabadell): nombre + importe exacto único
-      const m1 = cands.filter(c => !usadasLoc.has(c.clave) && Math.abs(c.importe - rec.importe) < 0.01 &&
+      // 2) Sin referencias (PDF Bankinter/Sabadell): nombre + importe exacto (si hay varias
+      //    del mismo importe — cuota mensual — gana la más cercana anterior a la remesa)
+      const m1 = cands.filter(c => !usadasGlob.has(bkNormClave(c.clave)) && Math.abs(c.importe - rec.importe) < 0.01 &&
         (bkNombreEnConcepto(c.cliente, rec.deudor) || bkNombreEnConcepto(rec.deudor, c.cliente)));
-      if (m1.length === 1) {
-        usadasLoc.add(m1[0].clave);
-        entradas.push({ serie: m1[0].serie, numero: m1[0].numero, importe: rec.importe, cliente: rec.deudor, situacion: rec.situacion });
+      if (m1.length) {
+        const elegido = m1.length === 1 ? m1[0] : masCercana(m1);
+        usadasGlob.add(bkNormClave(elegido.clave));
+        entradas.push({ serie: elegido.serie, numero: elegido.numero, importe: rec.importe,
+          cliente: rec.deudor + (m1.length > 1 ? ' 🪄' : ''), situacion: rec.situacion });
         conFactura++;
         return;
       }
       // 3) 🪄 MAGIA: combinación de facturas del MISMO cliente que suman el recibo
       const sol = magiaCliente(rec, rec.importe);
       if (sol && sol.length) {
-        sol.forEach(c => { usadasLoc.add(c.clave); entradas.push({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: rec.deudor + ' 🪄', situacion: rec.situacion }); });
+        sol.forEach(c => { usadasGlob.add(bkNormClave(c.clave)); entradas.push({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: rec.deudor + ' 🪄', situacion: rec.situacion }); });
         conFactura++;
         return;
       }
@@ -4438,12 +4469,21 @@ async function remesaDeducir(id) {
     !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || ''));
   let resueltas = 0, sinResolver = [];
   const nuevo = [];
+  // Desempate por fecha (cuotas mensuales del mismo importe): la más cercana ANTERIOR a la remesa
+  const masCercanaD = lista => lista.slice().sort((a, b) => {
+    const ref = m.fecha || '';
+    const va = a.fecha && ref ? Math.abs(new Date(ref) - new Date(a.fecha)) + (a.fecha > ref ? 1e12 : 0) : 9e15;
+    const vb = b.fecha && ref ? Math.abs(new Date(ref) - new Date(b.fecha)) + (b.fecha > ref ? 1e12 : 0) : 9e15;
+    return va - vb;
+  })[0];
   m.conciliado.forEach(f => {
     if (f.serie !== '—') { nuevo.push(f); return; }
     const grupo = cands.filter(c => !usadas.has(bkNormClave(c.clave)) &&
       (bkNombreEnConcepto(c.cliente, f.cliente || '') || bkNombreEnConcepto(f.cliente || '', c.cliente)));
     const exactas = grupo.filter(c => Math.abs(c.importe - (f.importe || 0)) < 0.01);
-    const sol = exactas.length === 1 ? [exactas[0]] : bkBuscarDesglose(grupo, f.importe || 0);
+    const sol = exactas.length === 1 ? [exactas[0]]
+              : exactas.length > 1 ? [masCercanaD(exactas)]
+              : bkBuscarDesglose(grupo, f.importe || 0);
     if (sol && sol.length) {
       sol.forEach(c => { usadas.add(bkNormClave(c.clave)); nuevo.push({ serie: c.serie, numero: c.numero,
         importe: sol.length === 1 ? f.importe : c.importe, cliente: (f.cliente || '') + ' 🪄', situacion: f.situacion || 'abonado' }); });
