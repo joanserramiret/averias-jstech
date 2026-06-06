@@ -709,8 +709,8 @@
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
           <span>🧩 Remesas y devoluciones <span style="font-weight:400;font-size:12px;color:var(--texto-suave)">(para no tener que entrar al banco)</span></span>
           <span style="display:flex;gap:8px;align-items:center">
-            <input type="file" id="rem-pdf" accept=".pdf" multiple style="display:none" onchange="remesasImportarPDF(this.files)"/>
-            <button onclick="document.getElementById('rem-pdf').click()" title="Sube el 'listado de adeudos de la remesa' del banco y desgloso recibo a recibo" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📎 Listado del banco (PDF)</button>
+            <input type="file" id="rem-pdf" accept=".pdf,.txt,.jpg,.jpeg,.png,.webp,.gif" multiple style="display:none" onchange="remesasImportarPDF(this.files)"/>
+            <button onclick="document.getElementById('rem-pdf').click()" title="Sube el documento del banco (PDF, TXT o foto/imagen — las imágenes y escaneos se leen con OCR) y desgloso recibo a recibo" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📎 Documento del banco (PDF/TXT/foto)</button>
             <button onclick="remesasLimpiarDesgloses()" title="Deshace los desgloses automáticos antiguos (inventados por suma de importes)" style="padding:6px 12px;background:#fde8e8;border:1.5px solid #e0b0b0;color:#c0392b;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🧹 Deshacer desgloses inventados</button>
             <button onclick="exportarRemesas()" title="Descargar el detalle en Excel" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📊 Excel</button>
             <button onclick="bkRemesas()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
@@ -734,7 +734,7 @@
               <option value="duplicado">🧹 Duplicados</option>
               <option value="no_factura">📦 No facturas (albaranes/avisos)</option>
             </select>
-            <input type="text" id="pv-buscar" oninput="pvRender()" placeholder="Buscar proveedor o archivo..."
+            <input type="text" id="pv-buscar" oninput="pvRender()" placeholder="Buscar proveedor, importe, NIF, concepto… (también dentro del documento)"
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:200px"/>
             <button onclick="pvCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
           </span>
@@ -743,7 +743,7 @@
         <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:12px;font-size:12px">
           <span style="display:flex;gap:6px;align-items:center;background:#f7f9fd;border:1px solid var(--borde);border-radius:10px;padding:6px 10px">
             <b style="color:var(--texto-suave);font-size:10.5px;text-transform:uppercase">1 · Entrada</b>
-            <input type="file" id="pv-subir" accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png" multiple style="display:none" onchange="pvSubirManual(this.files)"/>
+            <input type="file" id="pv-subir" accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.webp,.gif" multiple style="display:none" onchange="pvSubirManual(this.files)"/>
             <button onclick="document.getElementById('pv-subir').click()" title="Subir facturas a mano (PDF, Excel, JPG, PNG) — van al cajón IA y de ahí a su mes" style="padding:6px 12px;background:#1a2e6e;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">➕ Subir factura</button>
             <button onclick="pvCorreo()" id="pv-correo" title="Buscar facturas PDF en el correo (Outlook + Webempresa) y dejarlas en el cajón IA" style="padding:6px 12px;background:#1a7a3f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📧 Del correo</button>
             <button onclick="pvOrdenarCajon()" id="pv-cajon" title="Ordenar las facturas del cajón desastre IA en sus meses" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🗂 Ordenar cajón</button>
@@ -3229,7 +3229,7 @@ async function bkRemesas() {
           (facts.some(x => x.serie === '—') ? '<button onclick="remesaDeducir(' + m.id + ')" title="Deducir las facturas de los recibos sin localizar, por cliente e importes" style="padding:4px 10px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px">🪄 Deducir facturas</button>' : '') +
           (esPropuesta ? '<button onclick="remesaEditarCuadre(' + m.id + ')" title="Editar el cuadre manual: añadir o quitar facturas" style="padding:4px 10px;background:#fff3e0;border:1px solid #e8b27a;color:#b45309;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px">✏ Editar cuadre</button>' : '') +
           '<button onclick="remesaDeshacer(' + m.id + ')" title="Deshacer este desglose: el movimiento vuelve a pendientes y las facturas quedan libres" style="padding:4px 10px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;cursor:pointer">✕ Deshacer desglose</button></div>'
-        : '<div style="font-size:12px;color:var(--texto-suave);margin-top:6px">Sin desglosar — súbeme el listado del banco con 📎 (PDF de Bankinter o TXT del Sabadell). ' +
+        : '<div style="font-size:12px;color:var(--texto-suave);margin-top:6px">Sin desglosar — súbeme el documento del banco con 📎 (PDF/TXT de Bankinter o Sabadell, o una foto/imagen del justificante: la leo con OCR). ' +
           '<button onclick="remesaProponerCuadre(' + m.id + ')" style="margin-left:8px;padding:4px 10px;background:#fff3e0;border:1.5px solid #e8b27a;color:#b45309;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🧮 Proponer cuadre</button>' +
           '<button onclick="remesaCerrarSinDesglose(' + m.id + ',' + m.importe + ')" style="margin-left:6px;padding:4px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:6px;font-size:11px;cursor:pointer">✓ Cerrar sin desglose</button>' +
           ' <span style="font-size:11px">(🧮 = facturas cobradas por Recibo Bancario en Ágora, fechas cercanas y suma exacta — tú confirmas viendo los nombres)</span></div>';
@@ -3934,7 +3934,7 @@ async function pvEscanear() {
     const d = await r.json();
     if (d.ok) {
       alert('🔍 Escaneo completado:\n· ' + d.extraidos + ' con importe extraído\n· ' + d.dudosos +
-            ' dudosos (sin total claro)\n· ' + d.sin_texto + ' escaneados sin texto (corrígelos a mano o pásalos por OCR)' +
+            ' dudosos (sin total claro)\n· ' + d.sin_texto + ' escaneados o fotos sin texto (pásalos por 🤖 OCR IA o corrígelos a mano)' +
             (d.saltados ? '\n· ' + d.saltados + ' corregidos a mano (intactos)' : ''));
       await pvCargarDatos(anio);
       pvRender();
@@ -4090,19 +4090,41 @@ async function pvCorregir(ruta) {
   } catch(e) { alert('Error: ' + e.message); }
 }
 
+// Búsqueda DENTRO de los documentos (texto extraído del PDF / OCR): nombre fiscal, NIF, conceptos...
+let pvBuscaTimer = null, pvContenido = { q: '', rutas: new Set() };
+function pvBuscaContenido(q, anio) {
+  clearTimeout(pvBuscaTimer);
+  pvBuscaTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(BRIDGE_URL_C + '/proveedores/buscar?anio=' + anio + '&q=' + encodeURIComponent(q),
+        { headers: { 'ngrok-skip-browser-warning': 'true' } });
+      const d = await r.json();
+      pvContenido = { q, rutas: new Set(d.rutas || []) };
+      // re-pintar solo si el usuario sigue buscando lo mismo
+      if ((document.getElementById('pv-buscar').value || '').toLowerCase().trim() === q) pvRender();
+    } catch (e) { /* bridge dormido: la búsqueda local sigue funcionando */ }
+  }, 350);
+}
+
 function pvRender() {
   const listEl = document.getElementById('pv-lista');
-  const q = (document.getElementById('pv-buscar').value || '').toLowerCase();
+  const q = (document.getElementById('pv-buscar').value || '').toLowerCase().trim();
   const anio = document.getElementById('pv-anio').value || new Date().getFullYear();
   const filtro = document.getElementById('pv-filtro').value;
   let lista = pvArchivos;
-  if (q) lista = lista.filter(a => {
-    // Buscador a fondo: archivo, proveedor, fecha e IMPORTE (con punto o coma)
-    const dat = pvDatos[anio + '/' + a.rel] || {};
-    const blob = ((a.rel || '') + ' ' + (a.proveedor || '') + ' ' + (dat.fecha || '') + ' ' +
-      (dat.total != null ? dat.total.toFixed(2) + ' ' + dat.total.toFixed(2).replace('.', ',') : '')).toLowerCase();
-    return blob.includes(q);
-  });
+  if (q) {
+    const enContenido = pvContenido.q === q ? pvContenido.rutas : null;
+    lista = lista.filter(a => {
+      // Buscador a fondo: archivo, proveedor, fecha e IMPORTE (con punto o coma)...
+      const dat = pvDatos[anio + '/' + a.rel] || {};
+      const blob = ((a.rel || '') + ' ' + (a.proveedor || '') + ' ' + (dat.fecha || '') + ' ' +
+        (dat.total != null ? dat.total.toFixed(2) + ' ' + dat.total.toFixed(2).replace('.', ',') : '')).toLowerCase();
+      if (blob.includes(q)) return true;
+      // ...y DENTRO del documento (texto del PDF u OCR, desgranado por el bridge)
+      return enContenido ? enContenido.has(anio + '/' + a.rel) : false;
+    });
+    if (q.length >= 3 && pvContenido.q !== q) pvBuscaContenido(q, anio);
+  }
   if (filtro) {
     lista = lista.filter(a => {
       const est = (pvDatos[anio + '/' + a.rel] || {}).estado;
@@ -4113,7 +4135,8 @@ function pvRender() {
       return true;
     });
   }
-  document.getElementById('pv-resumen').textContent = lista.length + ' documento(s)' + (q ? ' que coinciden' : '');
+  document.getElementById('pv-resumen').textContent = lista.length + ' documento(s)' +
+    (q ? (q.length >= 3 ? ' que coinciden (nombre + contenido 🔬)' : ' que coinciden') : '');
   if (!lista.length) { listEl.innerHTML = '<div style="color:var(--texto-suave);font-size:13px">Sin documentos.</div>'; return; }
 
   // Agrupar por mes
@@ -4266,15 +4289,15 @@ async function pvSubirManual(files) {
     } catch(e) { errores.push(f.name + ': ' + e.message); }
   }
   document.getElementById('pv-subir').value = '';
-  const hayPdf = [...files].some(f => /\.pdf$/i.test(f.name));
-  if (ok && hayPdf && confirm('➕ ' + ok + ' archivo(s) subidos al cajón IA' +
+  const hayOrdenable = [...files].some(f => /\.(pdf|jpe?g|png|webp|gif)$/i.test(f.name));
+  if (ok && hayOrdenable && confirm('➕ ' + ok + ' archivo(s) subidos al cajón IA' +
       (errores.length ? '\n✗ ' + errores.join('\n✗ ') : '') +
-      '\n\n¿Ordeno el cajón ahora? (cada PDF a su mes, con fecha leída del documento)')) {
+      '\n\n¿Ordeno el cajón ahora? (cada PDF o imagen a su mes, con fecha leída del documento — las fotos se leen con OCR)')) {
     pvOrdenarCajon();
   } else if (ok) {
     alert('➕ ' + ok + ' archivo(s) en el cajón IA.' +
       (errores.length ? '\n✗ ' + errores.join('\n✗ ') : '') +
-      (hayPdf ? '' : '\n(Excel/imágenes quedan en el cajón para colocarlos a mano — el 🗂 solo ordena PDFs.)'));
+      (hayOrdenable ? '' : '\n(Los Excel quedan en el cajón para colocarlos a mano — el 🗂 ordena PDFs e imágenes.)'));
   } else alert('✗ No se subió nada:\n' + errores.join('\n'));
 }
 

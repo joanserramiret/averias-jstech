@@ -79,11 +79,11 @@
 <div class="card">
   <p style="margin-top:0">El extracto solo trae el <b>total</b> de cada remesa. Para el desglose real recibo a recibo:</p>
   <div class="paso"><b class="n">1</b><div>Descarga del banco el detalle: en <b>Bankinter</b> el PDF "listado de adeudos de la remesa"; en <b>Sabadell</b> el fichero TXT de la remesa (el SEPA que se presentó).</div></div>
-  <div class="paso"><b class="n">2</b><div>Pestaña Remesas → <span class="btn">📎 Listado del banco (PDF)</span> → selecciona el archivo (o varios a la vez).</div></div>
+  <div class="paso"><b class="n">2</b><div>Pestaña Remesas → <span class="btn">📎 Documento del banco (PDF/TXT/foto)</span> → selecciona el archivo (o varios a la vez). Vale también una <b>foto o pantallazo</b> del justificante: se transcribe con OCR y se procesa igual.</div></div>
   <div class="paso"><b class="n">3</b><div>La remesa queda <span class="ok">✓ desglosada</span> con cada cliente y factura; los recibos <span class="rojo">↩ DEVUELTOS</span> salen en rojo (lista de reclamación).</div></div>
   <p>Sin fichero del banco hay dos salidas: <span class="btn">🧮 Proponer cuadre</span> (reconstrucción a partir de las facturas cobradas por Recibo Bancario en una ventana de 25→45→90 días antes del abono — queda marcada <span class="ambar">🧮 propuesta</span>, revísala antes de aceptar) o <span class="btn">✓ Cerrar sin desglose</span>. Todo tiene <span class="btn">✕ Deshacer</span>: nada es irreversible.</p>
   <p>Las <b>devoluciones</b> se separan solas: <span class="rojo">↩ recibos devueltos por clientes</span> (a reclamar) y <span class="ambar">↪ recibos nuestros devueltos a proveedores</span> (ya pagados por transferencia). Los gastos de devolución que cobra el banco aparecen ligados a su remesa.</p>
-  <p><b>Formatos que lee el 📎</b> (5): listado de adeudos de Bankinter (PDF), TXT de Bankinter Empresas, fichero SEPA del Sabadell (TXT), PDF del abono de remesa del Sabadell y <b>PDF de impagado del Sabadell</b> (marca la devolución en su remesa y casa el cargo con gastos). Todo documento importado queda <b>archivado</b> y visible con el enlace <span class="btn">👁 documento</span> de la remesa.</p>
+  <p><b>Formatos que lee el 📎</b> (6): listado de adeudos de Bankinter (PDF), TXT de Bankinter Empresas, fichero SEPA del Sabadell (TXT), PDF del abono de remesa del Sabadell, <b>PDF de impagado del Sabadell</b> (marca la devolución en su remesa y casa el cargo con gastos) y <b>justificante de cargo de CaixaBank</b> ("Domiciliación de pagos — Cargo", el que aporta el cliente como prueba). Cualquiera de ellos vale además como <b>imagen</b> (JPG/PNG/foto del móvil) o PDF escaneado: se lee con OCR de IA. Todo documento importado queda <b>archivado</b> y visible con el enlace <span class="btn">👁 documento</span> de la remesa.</p>
   <p>Recibos sin localizar: <span class="btn">🪄 Deducir facturas</span> (por cliente e importes) o <span class="btn">✎ Asignar</span> a mano desde el listado completo — <b>tu asignación manual prevalece</b> sobre cualquier suposición, y si el importe no cuadra, la diferencia se anota como gastos repercutidos. El ⚡ también casa solo las devoluciones ("DEVOLUCION RECIBO") y los recobros por transferencia con gastos.</p>
 </div>
 
@@ -91,18 +91,18 @@
 <div class="card">
 <table>
   <tr><th>Quiero…</th><th>Cómo</th></tr>
-  <tr><td>Subir una factura a mano</td><td><span class="btn">➕ Subir factura</span> (PDF, Excel, JPG o PNG) → va al cajón IA y te ofrece ordenarla a su mes</td></tr>
-  <tr><td>Leer los importes de los PDF nuevos</td><td><span class="btn">🔍 Escanear</span> (los corregidos a mano no se tocan). Los botones van por orden de flujo: 1·Entrada → 2·Lectura → 3·Control</td></tr>
+  <tr><td>Subir una factura a mano</td><td><span class="btn">➕ Subir factura</span> (PDF, Excel o imagen JPG/PNG/foto) → va al cajón IA y te ofrece ordenarla a su mes</td></tr>
+  <tr><td>Leer los importes de los documentos nuevos</td><td><span class="btn">🔍 Escanear</span> lee PDFs e <b>imágenes</b> (los corregidos a mano no se tocan). Las fotos y escaneos sin texto quedan marcados y se leen con <span class="btn">🤖 OCR IA</span>. Los botones van por orden de flujo: 1·Entrada → 2·Lectura → 3·Control</td></tr>
   <tr><td>Corregir un importe mal leído</td><td>Clic sobre el importe de la fila → escribir el valor</td></tr>
   <tr><td>Cambiar el tipo de un documento</td><td>Botón 🧾/📋/🔔/📦 de la fila → selector visual (factura, albarán, aviso, otro o uno nuevo). La elección manda para siempre</td></tr>
   <tr><td>Cambiar el tipo de varios a la vez</td><td>Casillas a la izquierda (o la de la cabecera = todo lo visible) → barra azul arriba → 🧾 Factura / 📋 Albarán…</td></tr>
-  <tr><td>Buscar entre todas las facturas</td><td>El buscador encuentra por proveedor, archivo, fecha e <b>importe</b> (vale "463,26" o "463.26")</td></tr>
+  <tr><td>Buscar entre todas las facturas</td><td>El buscador mira el nombre del archivo, proveedor, fecha e <b>importe</b> (vale "463,26" o "463.26") y además <b>dentro del documento</b> 🔬: nombre fiscal del emisor, NIF/CIF, descripciones y los importes impresos. Escribe 3+ letras y busca solo. (El contenido se desgrana al 🔍 Escanear; en fotos lo aporta el 🤖 OCR.)</td></tr>
   <tr><td>Me rectificaron una factura (mismo nº)</td><td>Botón 🔄 de la fila → eliges el PDF nuevo → el original va a PARA BORRAR y la rectificada ocupa su lugar, releída</td></tr>
   <tr><td>Pagar una factura en varios plazos</td><td>Al conciliar un pago menor que la factura, ofrece imputarlo como <b>pago a cuenta</b> 💳; en los siguientes pagos la factura aparece "quedan X €" hasta completarse</td></tr>
   <tr><td>Quitar un PDF que se ha colado</td><td>Botón 🗑 → va a la carpeta PARA BORRAR del Dropbox (y puede aprender el patrón para apartar los futuros solos)</td></tr>
   <tr><td>Documentos colados en el año equivocado</td><td><span class="btn">📅 Cuadrar por año</span> → mueve a su carpeta de año los que tengan fecha de otro ejercicio</td></tr>
   <tr><td>Facturas de Movistar (llegan en HTML)</td><td>El barrido del correo las convierte a PDF solo y las deja en el cajón como las demás</td></tr>
-  <tr><td>Traer facturas del correo</td><td><span class="btn">📧 Facturas del correo</span> → barre los buzones y deja los PDF en el cajón → <span class="btn">🗂 Ordenar cajón IA</span> los coloca por mes en PDTE CONTABILITZAR</td></tr>
+  <tr><td>Traer facturas del correo</td><td><span class="btn">📧 Facturas del correo</span> → barre los buzones y deja los PDF en el cajón → <span class="btn">🗂 Ordenar cajón IA</span> los coloca por mes en PDTE CONTABILITZAR (también las imágenes: la fecha se lee con OCR)</td></tr>
   <tr><td>Ver albaranes sin factura posterior</td><td><span class="btn">🔎 Albaranes sin factura</span> — candidatos a reclamar al proveedor</td></tr>
 </table>
 </div>
