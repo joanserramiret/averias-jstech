@@ -443,9 +443,9 @@
     <!-- PERIOD BAR (shared) -->
     <div class="period-bar" id="period-bar">
       <label>Período</label>
-      <input type="date" id="c-desde" onchange="try{actualizarCobros()}catch(e){}" />
+      <input type="date" id="c-desde" onchange="refrescarPorPeriodo()" />
       <span style="color:var(--texto-suave)">—</span>
-      <input type="date" id="c-hasta" onchange="try{actualizarCobros()}catch(e){}" />
+      <input type="date" id="c-hasta" onchange="refrescarPorPeriodo()" />
       <div class="period-shortcuts">
         <button class="shortcut-btn" onclick="setPeriod('month', event)">Este mes</button>
         <button class="shortcut-btn" onclick="setPeriod('q1', event)">T1</button>
@@ -951,7 +951,16 @@ function setPeriod(type, evt) {
   if (tgt && tgt.classList) tgt.classList.add('active');
   // Las vistas que filtran por período se refrescan en vivo (con los datos ya cargados;
   // si el período pedido va más atrás de lo cargado, toca 🔍 Cargar datos)
+  refrescarPorPeriodo();
+}
+
+// Refresca las vistas que obedecen al período de la barra: cartera siempre; Tesorería si está abierta
+function refrescarPorPeriodo() {
   try { actualizarCobros(); } catch(e) {}
+  try {
+    const tab = document.getElementById('ctab-banco');
+    if (tab && tab.classList.contains('active')) bkCargar();
+  } catch(e) {}
 }
 
 // ===== API =====
@@ -2735,15 +2744,19 @@ async function bkCargar() {
       fetch(BRIDGE_URL_C + '/banco/movimientos?estado=' + estado + (categoria ? '&categoria=' + categoria : ''), { headers: { 'ngrok-skip-browser-warning': 'true' } }),
       fetch(BRIDGE_URL_C + '/banco/resumen', { headers: { 'ngrok-skip-browser-warning': 'true' } })
     ]);
-    bkMovs = (await rMov.json()).movimientos || [];
+    const bkTodos = (await rMov.json()).movimientos || [];
     // Facturas ya usadas en CUALQUIER conciliación (claves normalizadas, grupos REF expandidos)
-    // + importes ya imputados por factura (para pagos a cuenta de proveedores)
+    // + importes ya imputados por factura — SIEMPRE sobre TODOS los movimientos, sin recorte
     bkUsadas = new Set();
     bkImputado = {};
-    bkMovs.forEach(m => bkClavesDeConciliado(m.conciliado).forEach(([k, f]) => {
+    bkTodos.forEach(m => bkClavesDeConciliado(m.conciliado).forEach(([k, f]) => {
       bkUsadas.add(k);
       bkImputado[k] = Math.round(((bkImputado[k] || 0) + (f.importe || 0)) * 100) / 100;
     }));
+    // La VISTA respeta el período de la barra superior (si no, salían pendientes de otros años)
+    const perD = (document.getElementById('c-desde') || {}).value || '';
+    const perH = (document.getElementById('c-hasta') || {}).value || '';
+    bkMovs = bkTodos.filter(m => (!perD || !m.fecha || m.fecha >= perD) && (!perH || !m.fecha || m.fecha <= perH));
     bkActualizarBancos();
     const res = await rRes.json();
     // Cuadre = % de movimientos explicados (conciliados con documento o categorizados)
