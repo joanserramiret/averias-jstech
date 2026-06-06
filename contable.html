@@ -697,7 +697,7 @@
             <input type="text" id="bk-buscar" oninput="bkRender()" placeholder="🔍 Buscar en todo: concepto, importe, cliente, factura..."
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:240px"/>
             <button onclick="bkCategorizar()" id="bk-cat" title="Clasificar nóminas, impuestos, comisiones, SS y aportaciones" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🏷 Categorizar</button>
-            <button onclick="bkAutoconciliar()" id="bk-auto" title="⚠ ADIVINA por importe y nombre — puede inventar. Úsala solo si luego repasas una a una. Lo fiable: 📎 ficheros del banco y 🔗 a mano" style="padding:6px 12px;background:#fff;border:2px dashed #c0392b;color:#c0392b;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">⚡ Autoconciliar ⚠</button>
+            <button onclick="bkAutoconciliar()" id="bk-auto" title="NO escribe nada: genera SUGERENCIAS (regla: el nombre fiscal manda) y te las enseña en una pantalla de punteo — solo se concilia lo que tú marques" style="padding:6px 12px;background:#fff;border:2px dashed #7c3aed;color:#7c3aed;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">⚡ Sugerir conciliaciones</button>
             <button onclick="bkDuplicados()" title="Detectar y quitar movimientos repetidos (entraron por N43 y por el banco a la vez)" style="padding:6px 12px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🧹 Duplicados</button>
             <button onclick="bkCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
           </span>
@@ -3015,8 +3015,8 @@ function bkRender() {
       // Conciliación PARCIAL: lo asignado no llega al importe del movimiento → se ve y se puede seguir
       const restoConc = conc ? Math.round((Math.abs(m.importe) - conc.reduce((s, f) => s + (f.importe || 0), 0)) * 100) / 100 : 0;
       const esParcial = conc && restoConc > 0.01;
-      // Aviso de INVENTO: la conciliación viene de una deducción (⚡/🪄), no de documento ni mano
-      const esInvento = conc && conc.some(f => f.origen === 'deduccion' || /🪄|⚡/.test(f.cliente || ''));
+      // Aviso de INVENTO: deducción sin revisar (⚡ a secas o 🪄). Las ⚡✓ están punteadas por humano.
+      const esInvento = conc && conc.some(f => f.origen === 'deduccion' || /🪄|⚡(?!✓)/u.test(f.cliente || ''));
       const chipInvento = esInvento ? ' <span title="DEDUCIDO automáticamente (sin documento del banco): un invento hasta que lo verifiques — revísalo y rehazlo con 🔗 si no te cuadra" style="background:#fde8e8;color:#c0392b;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:800">⚡ INVENTO</span>' : '';
       const badge = conc
         ? (esParcial
@@ -3587,21 +3587,13 @@ async function bkDesconciliar(id) {
   } catch(e) { alert('Error: ' + e.message); }
 }
 
+// ⚡ MODO SUGERENCIA (rediseño pactado con Joan, 2026-06): el motor NO ESCRIBE NADA.
+// Bajo la doctrina "EL NOMBRE FISCAL MANDA", genera propuestas y las presenta en una
+// pantalla de revisión donde se puntean una a una — solo lo MARCADO se concilia.
+let bkSugerencias = [];
+
 async function bkAutoconciliar() {
   const btn = document.getElementById('bk-auto');
-  // ⚠⚠ ZONA "VAMOS A CONTAR MENTIRAS, TRALARÁ" ⚠⚠ (a petición de Joan, 2026-06)
-  // La autoconciliación ADIVINA por importe y nombre. Ya montó un drama una vez
-  // (facturas inventadas, cuotas mensuales cruzadas). Solo pasa con doble aviso.
-  if (!confirm('⚠️ AVISO 1 de 2 — "Vamos a contar mentiras, tralará" 🎶\n\n' +
-      'La autoconciliación ADIVINA casando importes y nombres. NO lee ningún documento del banco.\n' +
-      'Puede emparejar facturas equivocadas (cuotas mensuales del mismo importe, clientes parecidos...) ' +
-      'y dar por cobrado lo que no lo está.\n\n' +
-      'Lo FIABLE es: 📎 ficheros del banco en Remesas y 🔗 conciliación manual.\n\n¿Seguro que quieres que adivine?')) return;
-  if (!confirm('⚠️ AVISO 2 de 2 — última oportunidad de huir 🏃\n\n' +
-      'Si sigues, REVISA después UNA A UNA cada conciliación que haga (badge ✅ en Tesorería, ' +
-      'chivato 🚨 de duplicadas en Remesas y 🩺 Auditar cartera son tus amigos).\n' +
-      'Todo lo que haga es reversible (✕ Deshacer), pero el susto en el dashboard te lo llevas igual.\n\n' +
-      '¿Adelante con las mentiras, tralará?')) return;
   // Fuentes: facturas de Ágora (abonos) y de proveedor (cargos) — cada movimiento usa la suya
 
   // Facturas ya usadas en alguna conciliación (de cualquier movimiento)
@@ -3629,13 +3621,15 @@ async function bkAutoconciliar() {
   }
 
   btn.disabled = true;
-  let hechos = 0, dudosos = 0, remesas = 0, porNombre = 0, porGrupo = 0, devolsCasadas = 0, recobros = 0;
+  bkSugerencias = [];
+  let dudosos = 0;
   for (const m of pendientes) {
     const objetivo = Math.abs(m.importe);
     const esDevol = bkEsDevolCliente(m);  // "IMP.R.D.SEPA DEVOLUCION RECIBO" y similares
+    let razon = '';
     // ══ EL NOMBRE FISCAL MANDA Y ES INAMOVIBLE (doctrina Joan, 2026-06) ══
     // Solo son candidatas las facturas cuyo CLIENTE aparece en el concepto del banco.
-    // Si el concepto no trae nombre reconocible, NO se deduce nada (a mano con 🔗).
+    // Si el concepto no trae nombre reconocible, NO se sugiere nada (a mano con 🔗).
     // El importe ya NO basta: era la fuente de los inventos (mismo importe, cliente distinto).
     const libres = (esDevol ? bkCandidatos(m) : bkCandidatos(m).filter(c => !usadas.has(bkNormClave(c.clave))))
       .filter(c => bkNombreEnConcepto(c.cliente, m.concepto));
@@ -3643,7 +3637,7 @@ async function bkAutoconciliar() {
     let facturasElegidas = null;
     if (matches.length === 1) {
       facturasElegidas = [matches[0]];
-      if (esDevol) devolsCasadas++; else porNombre++;
+      razon = esDevol ? '↩ devolución: nombre + importe' : '🪪 nombre fiscal + importe exacto';
     } else if (matches.length > 1) {
       // Mismo cliente Y mismo importe en varias facturas (cuota mensual):
       // gana la más cercana ANTERIOR a la fecha del movimiento
@@ -3653,7 +3647,7 @@ async function bkAutoconciliar() {
         const vb = b.fecha && ref ? Math.abs(new Date(ref) - new Date(b.fecha)) + (b.fecha > ref ? 1e12 : 0) : 9e15;
         return va - vb;
       })[0];
-      if (cercana) { facturasElegidas = [cercana]; porNombre++; if (esDevol) devolsCasadas++; }
+      if (cercana) { facturasElegidas = [cercana]; razon = '📅 cuota mensual: nombre + importe, la más cercana (¡revisa el mes!)'; }
       else dudosos++;
     } else {
       // Sin importe exacto → ¿paga varias facturas de un mismo cliente/proveedor citado en el concepto?
@@ -3667,7 +3661,7 @@ async function bkAutoconciliar() {
       for (const n in grupos) {
         const grupo = grupos[n].filter(c => !c.fecha || !m.fecha || c.fecha <= m.fecha);
         const sol = bkBuscarDesglose(grupo, objetivo);
-        if (sol && sol.length) { facturasElegidas = sol; porGrupo++; break; }
+        if (sol && sol.length) { facturasElegidas = sol; razon = '👥 suma de facturas del mismo cliente (combinación deducida)'; break; }
       }
       // RECOBRO de un recibo devuelto por TRANSFERENCIA (factura + gastos de devolución
       // repercutidos, o método de pago mal puesto en Ágora): factura DEVUELTA del cliente
@@ -3683,64 +3677,129 @@ async function bkAutoconciliar() {
           facturasElegidas = [devs[0]];
           if (difG >= 0.01) facturasElegidas.push({ serie: 'GASTOS', numero: 'gastos devolución repercutidos',
             importe: difG, cliente: devs[0].cliente });
-          recobros++;
+          razon = '💪 recobro de devuelta por transferencia' + (difG >= 0.01 ? ' (+' + bkFmt(difG) + ' gastos)' : '');
         }
       }
       // Las remesas NO se adivinan por combinación de importes (inventaba desgloses falsos
       // que secuestraban facturas) — se desglosan con el listado real del banco: pestaña 🧩 Remesas → 📎 PDF
     }
     // Devolución ANÓNIMA del Sabadell sin factura que casar: buscar el recibo por IMPORTE
-    // en las remesas desglosadas (caso KIOR: recibo "sin factura localizada" devuelto días después)
-    let marcadoYa = false;
+    // en las remesas desglosadas (caso KIOR) — SOLO LECTURA: no se marca nada hasta aprobar
+    let hitRemesa = null;
     if (!facturasElegidas && esDevol) {
-      const hit = await bkMarcarDevueltaPorImporte(m, todosMovs, null);
-      if (hit) {
-        facturasElegidas = [{ serie: hit.e.serie || '—', numero: hit.e.numero || '',
-          importe: Math.abs(m.importe), cliente: hit.e.cliente || '', clave: '' }];
-        devolsCasadas++;
-        marcadoYa = true;  // la remesa de origen ya está en rojo ↩
+      hitRemesa = bkBuscarReciboEnRemesas(m, todosMovs);
+      if (hitRemesa) {
+        facturasElegidas = [{ serie: hitRemesa.e.serie || '—', numero: hitRemesa.e.numero || '',
+          importe: Math.abs(m.importe), cliente: hitRemesa.e.cliente || '', clave: '' }];
+        razon = '↩ devolución anónima: recibo del mismo importe en remesa del ' + (hitRemesa.mov.fecha || '¿?');
       }
     }
     if (facturasElegidas) {
-      try {
-        const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-          body: JSON.stringify({ id: m.id, facturas: facturasElegidas.map(c => {
-            // TODO lo que casa el ⚡ es una DEDUCCIÓN (sin documento) → marcado como invento
-            const f = { serie: c.serie, numero: c.numero, importe: c.importe,
-              cliente: (c.cliente || '') + ' ⚡', origen: 'deduccion' };
-            if (esDevol) f.situacion = 'devuelto';  // el cargo de devolución marca la factura ↩
-            return f;
-          }) })
-        });
-        if ((await r.json()).ok) {
-          hechos++;
-          if (!esDevol) facturasElegidas.forEach(c => usadas.add(bkNormClave(c.clave)));  // la devuelta sigue en su remesa
-          else if (!marcadoYa) {
-            // y además la remesa de origen pasa a mostrarla en ROJO ↩ (corrige el "abonado" del Sabadell)
-            for (const c of facturasElegidas) {
-              if (c.serie === 'GASTOS' || c.serie === 'DESCUADRE') continue;
-              const ok = await bkMarcarDevueltaEnOrigen(bkNormClave(c.serie + '-' + c.numero), c.importe, c.cliente);
-              // si la remesa tenía el recibo SIN factura ("sin factura localizada"), se busca por
-              // importe y de paso se le pone la factura que la devolución acaba de identificar
-              if (!ok) await bkMarcarDevueltaPorImporte(m, todosMovs, c);
-            }
-          }
-        }
-      } catch(e) { /* seguir con el resto */ }
+      // SOLO SE SUGIERE — la escritura ocurre al aprobar en la pantalla de punteo
+      bkSugerencias.push({ m: m, facturas: facturasElegidas, esDevol: esDevol,
+        anonima: !!hitRemesa, razon: razon, ok: true });
+      if (!esDevol) facturasElegidas.forEach(c => usadas.add(bkNormClave(c.clave)));  // no sugerir la misma dos veces
     }
   }
   btn.disabled = false;
-  alert('⚡ Autoconciliación (TODO marcado como ⚡ INVENTO — revísalo):\n· ' + hechos + ' movimiento(s) conciliado(s)' +
-        (porNombre ? '\n   · ' + porNombre + ' por NOMBRE FISCAL + importe 🪪 (el nombre manda)' : '') +
-        (porGrupo ? '\n   · ' + porGrupo + ' por suma de facturas del mismo cliente 👥' : '') +
-        (devolsCasadas ? '\n   · ' + devolsCasadas + ' devolución(es) de recibo casadas con su factura ↩' : '') +
-        (recobros ? '\n   · ' + recobros + ' recobro(s) de devueltas por transferencia (con gastos) 💪' : '') +
-        (remesas ? '\n   · ' + remesas + ' remesa(s) de recibos desglosada(s) 🧩' : '') +
-        '\n· ' + dudosos + ' con varias facturas candidatas y sin nombre en el concepto (a mano)' +
-        '\n· ' + (pendientes.length - hechos - dudosos) + ' sin pareja');
+  if (!bkSugerencias.length) {
+    alert('⚡ Sin sugerencias: con la regla "el nombre fiscal manda" no hay parejas claras.\n' +
+      (dudosos ? '(' + dudosos + ' con empate irresoluble)\n' : '') + 'El resto, a mano con 🔗.');
+    return;
+  }
+  bkSugRender(dudosos, pendientes.length);
+}
+
+// ── Pantalla de PUNTEO de sugerencias: nada se escribe hasta que tú apruebas ──
+function bkSugRender(dudosos, totalPend) {
+  const viejo = document.getElementById('bksug-modal');
+  if (viejo) viejo.remove();
+  const div = document.createElement('div');
+  div.id = 'bksug-modal';
+  div.style.cssText = 'position:fixed;inset:0;z-index:10003;background:rgba(15,31,92,.55);display:flex;align-items:center;justify-content:center';
+  div.innerHTML = '<div style="background:#fff;border-radius:14px;padding:20px;width:900px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column">' +
+    '<div style="font-weight:800;font-size:15px;color:#1a2e6e">⚡ Sugerencias de conciliación — puntea y aprueba (nada está guardado aún)</div>' +
+    '<div style="font-size:12px;color:var(--texto-suave);margin:4px 0 10px">Regla: el NOMBRE FISCAL manda. ' + bkSugerencias.length + ' sugerencia(s) de ' + totalPend + ' pendientes' + (dudosos ? ' · ' + dudosos + ' con empate (a mano)' : '') + '. Desmarca lo que no veas claro — lo aprobado queda marcado ⚡✓ revisado.</div>' +
+    '<div id="bksug-lista" style="flex:1;overflow:auto;border:1px solid #eee;border-radius:8px"></div>' +
+    '<div style="display:flex;gap:8px;margin-top:12px;align-items:center">' +
+      '<button onclick="bkSugTodos(true)" style="padding:6px 10px;background:#f0f4fb;border:1px solid #c0cbea;border-radius:7px;font-size:12px;cursor:pointer">☑ Todas</button>' +
+      '<button onclick="bkSugTodos(false)" style="padding:6px 10px;background:#f0f4fb;border:1px solid #c0cbea;border-radius:7px;font-size:12px;cursor:pointer">☐ Ninguna</button>' +
+      '<span id="bksug-cuenta" style="font-size:12px;color:var(--texto-suave);flex:1"></span>' +
+      '<button onclick="bkAplicarSugerencias()" id="bksug-aplicar" style="padding:10px 18px;background:#1a7a3f;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✓ Conciliar las marcadas</button>' +
+      '<button onclick="document.getElementById(\'bksug-modal\').remove()" style="padding:10px 14px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;font-size:13px;cursor:pointer">Cancelar (no hacer nada)</button>' +
+    '</div></div>';
+  div.onclick = e => { if (e.target === div) div.remove(); };
+  document.body.appendChild(div);
+  bkSugPintar();
+}
+
+function bkSugPintar() {
+  const el = document.getElementById('bksug-lista');
+  if (!el) return;
+  el.innerHTML = bkSugerencias.map((s, i) =>
+    '<label style="display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border-bottom:1px solid #f3f3f3;cursor:pointer;background:' + (s.ok ? '#fff' : '#fafafa') + (s.ok ? ';border-left:4px solid #1a7a3f' : ';border-left:4px solid transparent;opacity:.55') + '">' +
+    '<input type="checkbox" ' + (s.ok ? 'checked' : '') + ' onchange="bkSugToggle(' + i + ')" style="width:auto;margin-top:3px"/>' +
+    '<div style="flex:1;font-size:12.5px">' +
+      '<b>' + (s.m.fecha || '') + '</b> · ' + (s.m.banco || '') + ' · <b style="color:' + (s.m.importe >= 0 ? '#1a7a3f' : '#c0392b') + '">' + bkFmt(s.m.importe) + '</b>' +
+      '<br><span style="color:#666">' + (s.m.concepto || '').slice(0, 95) + '</span>' +
+      '<br>→ ' + s.facturas.map(f => '<b style="color:#1a2e6e">' + (f.serie === 'GASTOS' ? '💸 ' + f.numero : f.serie + '-' + f.numero) + '</b> ' + (f.cliente || '') + ' · ' + bkFmt(f.importe)).join(' + ') +
+      '<br><span style="font-size:11px;color:#7c3aed;font-weight:700">' + s.razon + '</span>' +
+    '</div></label>').join('');
+  const n = bkSugerencias.filter(s => s.ok).length;
+  const cu = document.getElementById('bksug-cuenta');
+  if (cu) cu.textContent = n + ' de ' + bkSugerencias.length + ' marcadas';
+  const bt = document.getElementById('bksug-aplicar');
+  if (bt) bt.textContent = '✓ Conciliar las marcadas (' + n + ')';
+}
+
+function bkSugToggle(i) { if (bkSugerencias[i]) { bkSugerencias[i].ok = !bkSugerencias[i].ok; bkSugPintar(); } }
+function bkSugTodos(v) { bkSugerencias.forEach(s => { s.ok = v; }); bkSugPintar(); }
+
+async function bkAplicarSugerencias() {
+  const aprobadas = bkSugerencias.filter(s => s.ok);
+  if (!aprobadas.length) { alert('No hay sugerencias marcadas.'); return; }
+  const bt = document.getElementById('bksug-aplicar');
+  if (bt) { bt.disabled = true; bt.textContent = 'Conciliando...'; }
+  let hechos = 0, todosMovs = [];
+  try {
+    const rT = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    todosMovs = (await rT.json()).movimientos || [];
+  } catch(e) {}
+  for (const s of aprobadas) {
+    try {
+      const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ id: s.m.id, facturas: s.facturas.map(c => {
+          // ⚡✓ = sugerencia del motor APROBADA por un humano en la pantalla de punteo
+          const f = { serie: c.serie, numero: c.numero, importe: c.importe,
+            cliente: (c.cliente || '') + ' ⚡✓', origen: 'sugerencia' };
+          if (s.esDevol) f.situacion = 'devuelto';
+          return f;
+        }) })
+      });
+      if ((await r.json()).ok) {
+        hechos++;
+        if (s.esDevol) {
+          if (s.anonima) {
+            await bkMarcarDevueltaPorImporte(s.m, todosMovs, null);  // marca ↩ el recibo en su remesa
+          } else {
+            for (const c of s.facturas) {
+              if (c.serie === 'GASTOS' || c.serie === 'DESCUADRE') continue;
+              const ok = await bkMarcarDevueltaEnOrigen(bkNormClave(c.serie + '-' + c.numero), c.importe, c.cliente);
+              if (!ok) await bkMarcarDevueltaPorImporte(s.m, todosMovs, c);
+            }
+          }
+        }
+      }
+    } catch(e) { /* seguir con el resto */ }
+  }
+  const modal = document.getElementById('bksug-modal');
+  if (modal) modal.remove();
+  alert('⚡✓ ' + hechos + ' de ' + aprobadas.length + ' sugerencias aprobadas y conciliadas.\n' +
+    (bkSugerencias.length - aprobadas.length) + ' descartadas (no se ha tocado nada en ellas).');
   bkCargar();
+  refrescarEstadosCobro();
 }
 
 // ── 🧩 REMESAS Y DEVOLUCIONES ──
