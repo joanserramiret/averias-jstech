@@ -737,6 +737,7 @@
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:200px"/>
             <button onclick="pvControlAlbaranes()" title="Detectar albaranes que no tienen factura posterior del mismo proveedor" style="padding:6px 12px;background:#b45309;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🔎 Albaranes sin factura</button>
             <button onclick="pvCuadrarAnio()" title="Mover a su carpeta de año los documentos cuya fecha real no coincide con el año actual" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📅 Cuadrar por año</button>
+            <button onclick="pvReescanearTodo()" id="pv-reescan" title="Releer el importe de TODOS los años con la lógica actual (respeta los corregidos a mano)" style="padding:6px 12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">♻ Releer todos los años</button>
             <button onclick="pvCorreo()" id="pv-correo" title="Buscar facturas PDF en el correo (Outlook + Webempresa) y dejarlas en el cajón IA" style="padding:6px 12px;background:#1a7a3f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📧 Facturas del correo</button>
             <button onclick="pvOrdenarCajon()" id="pv-cajon" title="Ordenar las facturas del cajón desastre IA en sus meses" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🗂 Ordenar cajón IA</button>
             <button onclick="pvBorrarDuplicados()" id="pv-dup" title="Eliminar del Dropbox los PDF duplicados (se conserva el original)" style="padding:6px 12px;background:#c0392b;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🧹 Duplicados</button>
@@ -3190,6 +3191,36 @@ function pvRender() {
       filas + '</table>';
   }).join('');
   pvSelChange();
+}
+
+// Re-lee el importe de TODOS los años con la lógica actual (tras un cambio en el extractor)
+async function pvReescanearTodo() {
+  if (!confirm('♻ Voy a releer el importe de TODOS los años con la lógica nueva.\n' +
+    'Los corregidos a mano NO se tocan. Puede tardar varios minutos. ¿Empezamos?')) return;
+  const btn = document.getElementById('pv-reescan');
+  btn.disabled = true;
+  let hechos = [], fin = false, vueltas = 0, resumen = [];
+  try {
+    while (!fin && vueltas < 25) {
+      btn.textContent = '♻ Releyendo... ' + (hechos.length ? '(' + hechos.join(', ') + ')' : '');
+      const r = await fetch(BRIDGE_URL_C + '/proveedores/reescanear_todo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ hechos: hechos })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Error');
+      hechos = d.hechos || hechos;
+      fin = d.fin;
+      if (d.resultado_anio) resumen.push(d.anio + ': ' + (d.resultado_anio.extraidos || 0) + ' ok, ' + (d.resultado_anio.dudosos || 0) + ' dudosos');
+      vueltas++;
+    }
+    alert('♻ Relectura completada:\n\n' + resumen.join('\n'));
+    const anio = document.getElementById('pv-anio').value || new Date().getFullYear();
+    await pvCargarDatos(anio);
+    pvRender();
+  } catch(e) { alert('✗ ' + e.message); }
+  btn.disabled = false; btn.textContent = '♻ Releer todos los años';
 }
 
 // Reubica los documentos cuya fecha real cae en otro año a su carpeta correcta del Dropbox
