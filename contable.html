@@ -954,8 +954,11 @@ function setPeriod(type, evt) {
   refrescarPorPeriodo();
 }
 
-// Refresca las vistas que obedecen al período de la barra: cartera siempre; Tesorería si está abierta
+// Refresca EN VIVO todas las vistas que obedecen al período de la barra:
+// Resumen, Facturas emitidas y Cartera siempre; Tesorería solo si está abierta (refetch)
 function refrescarPorPeriodo() {
+  try { actualizarDashboard(); } catch(e) {}
+  try { filtrarFacturasC(); } catch(e) {}
   try { actualizarCobros(); } catch(e) {}
   try {
     const tab = document.getElementById('ctab-banco');
@@ -1336,6 +1339,18 @@ function bkPedirDescuadre(dif, cliente, opciones) {
   });
 }
 
+// ¿Cae la factura dentro del período de la barra superior? (filtro compartido por
+// Resumen, Facturas emitidas, Cartera de cobros y Tesorería — datos coherentes entre vistas)
+function fcEnPeriodo(f) {
+  const d0 = (document.getElementById('c-desde') || {}).value || '';
+  const d1 = (document.getElementById('c-hasta') || {}).value || '';
+  const fF = (f.Date || '').slice(0, 10);
+  if (!fF) return true;
+  if (d0 && fF < d0) return false;
+  if (d1 && fF > d1) return false;
+  return true;
+}
+
 function actualizarDashboard() {
   // La verdad bancaria se carga una vez y se repinta al llegar
   if (bkCobradasBanco === null) { bkCobradasBanco = 'cargando'; cargarCobradasBanco().then(actualizarDashboard); }
@@ -1352,6 +1367,7 @@ function actualizarDashboard() {
 
   todasFacturasC.forEach(f => {
     if (f._tipo !== 'factura') return;
+    if (!fcEnPeriodo(f)) return;  // el Resumen obedece al período de la barra
     const t = f.Totals ? f.Totals.GrossAmount : 0;
     const mesF = (f.Date || '').slice(0, 7);
 
@@ -1437,6 +1453,7 @@ function filtrarFacturasC() {
   facturasFiltC = todasFacturasC.filter(f => {
     // Tickets simplificados y sus devoluciones (T/TD/D): conversiones internas, fuera de los listados
     if (/^(T|TD|D)$/i.test(f.Serie || '')) return false;
+    if (!fcEnPeriodo(f)) return false;  // el listado obedece al período de la barra
     const nombre = (f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '').toLowerCase();
     const cif = (f.Customer ? f.Customer.Cif || '' : '').toLowerCase();
     const num = (f.Serie + '-' + f.Number).toLowerCase();
@@ -2219,14 +2236,7 @@ async function auditarCartera() {
 
 function actualizarCobros() {
   // TODOS los widgets de esta página respetan el período de la barra superior
-  const perDesde0 = (document.getElementById('c-desde') || {}).value || '';
-  const perHasta0 = (document.getElementById('c-hasta') || {}).value || '';
-  const enPeriodo = f => {
-    const fF = (f.Date || '').slice(0, 10);
-    if (perDesde0 && fF && fF < perDesde0) return false;
-    if (perHasta0 && fF && fF > perHasta0) return false;
-    return true;
-  };
+  const enPeriodo = fcEnPeriodo;
   const metodos = {};
   const hoy = new Date();
   todasFacturasC.filter(enPeriodo).forEach(f => {
@@ -3276,6 +3286,7 @@ async function bkGuardarConciliacion() {
     if (!d.ok) throw new Error('No se pudo guardar');
     bkCerrarModal();
     bkCargar();
+    refrescarEstadosCobro();  // Resumen, badges de facturas y cartera, EN VIVO
   } catch(e) { alert('Error: ' + e.message); }
 }
 
