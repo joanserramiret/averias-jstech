@@ -1526,6 +1526,8 @@ async function quitarImputacion(movId, idx) {
 
 // 🔗 Conciliar DESDE la factura: busca en el banco los abonos pendientes que cuadran
 // (importe exacto o nombre del cliente en el concepto) y concilia con un clic
+let cdfMovs = {};  // id → movimiento (para asignar dentro de remesas desde la factura)
+
 async function conciliarDesdeFactura(idx) {
   const f = facturasFiltC[idx];
   if (!f || !f.Totals) return;
@@ -1534,16 +1536,37 @@ async function conciliarDesdeFactura(idx) {
   const num = f.Serie + '-' + f.Number;
   let movs = [];
   try {
-    const r = await fetch(BRIDGE_URL_C + '/banco/movimientos?estado=pendiente', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const r = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
     movs = (await r.json()).movimientos || [];
   } catch(e) { alert('✗ Error consultando el banco: ' + e.message); return; }
+  cdfMovs = {};
+  movs.forEach(m => { cdfMovs[m.id] = m; });
 
-  const porImporte = movs.filter(m => m.importe > 0 && Math.abs(m.importe - t) < 0.01);
-  const porNombre = movs.filter(m => m.importe > 0 && !porImporte.includes(m) && cliente && bkNombreEnConcepto(cliente, m.concepto));
+  const pend = movs.filter(m => !m.conciliado && !m.categoria);
+  const porImporte = pend.filter(m => m.importe > 0 && Math.abs(m.importe - t) < 0.01);
+  const porNombre = pend.filter(m => m.importe > 0 && !porImporte.includes(m) && cliente && bkNombreEnConcepto(cliente, m.concepto));
   const cands = porImporte.concat(porNombre).slice(0, 12);
-  if (!cands.length) {
-    alert('🔗 ' + num + ' (' + t.toFixed(2) + '€ · ' + cliente + ')\n\nNo encuentro ningún abono pendiente que cuadre por importe ni por nombre.\n\n' +
-      'Lo más probable: se cobró dentro de una REMESA aún sin desglosar → pestaña Remesas → 📎 sube el listado del banco.');
+
+  // ...y las REMESAS donde podría caber: con hueco "sin factura" de su importe, con resto
+  // sin explicar suficiente, o aún sin desglosar (asignación parcial de la partida)
+  const enEstaClave = bkNormClave(num);
+  const remesas = movs.filter(m => m.importe > 0 && /REMESA|REM\.?\s*RECIBOS|ADEUDOS/i.test(m.concepto || ''))
+    .map(m => {
+      const facts = m.conciliado || [];
+      if (bkClavesDeConciliado(facts).some(([k]) => k === enEstaClave)) return null;  // ya está dentro
+      const resto = Math.round((m.importe - facts.reduce((s, x) => s + (x.importe || 0), 0)) * 100) / 100;
+      const hueco = facts.findIndex(x => x.serie === '—' && Math.abs((x.importe || 0) - t) < 0.01);
+      if (hueco >= 0) return { m, tipo: 'hueco', hueco, texto: 'recibo "sin factura localizada" de ' + bkFmt(t) + ' — encaja exacto' };
+      if (!facts.length && m.importe >= t - 0.01) return { m, tipo: 'vacia', hueco: -1, texto: 'sin desglosar — la factura entrará como desglose parcial' };
+      if (resto >= t - 0.01) return { m, tipo: 'resto', hueco: -1, texto: 'quedan ' + bkFmt(resto) + ' sin explicar' };
+      return null;
+    }).filter(Boolean)
+    .sort((a, b) => (a.tipo === 'hueco' ? 0 : a.tipo === 'resto' ? 1 : 2) - (b.tipo === 'hueco' ? 0 : b.tipo === 'resto' ? 1 : 2))
+    .slice(0, 8);
+
+  if (!cands.length && !remesas.length) {
+    alert('🔗 ' + num + ' (' + t.toFixed(2) + '€ · ' + cliente + ')\n\nNo encuentro ni abonos pendientes que cuadren ni remesas con sitio.\n\n' +
+      'Lo más probable: la remesa que la cobró no está en el extracto (¿de un período sin importar?) → Tesorería → importa el N43 y sube su listado con 📎.');
     return;
   }
   const viejo = document.getElementById('cdf-modal');
@@ -1553,16 +1576,51 @@ async function conciliarDesdeFactura(idx) {
   div.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(15,31,92,.5);display:flex;align-items:center;justify-content:center';
   div.innerHTML = '<div style="background:#fff;border-radius:14px;padding:22px;width:600px;max-width:94vw;max-height:85vh;overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.3)">' +
     '<div style="font-weight:800;font-size:15px;color:#1a2e6e;margin-bottom:4px">🔗 ¿Con qué cobro caso la ' + num + '?</div>' +
-    '<div style="font-size:12px;color:#888;margin-bottom:12px">' + cliente + ' · <b>' + t.toFixed(2) + '€</b> — abonos pendientes que cuadran (' +
-      porImporte.length + ' por importe, ' + porNombre.length + ' por nombre):</div>' +
+    '<div style="font-size:12px;color:#888;margin-bottom:12px">' + cliente + ' · <b>' + t.toFixed(2) + '€</b>' +
+      (cands.length ? ' — abonos pendientes que cuadran (' + porImporte.length + ' por importe, ' + porNombre.length + ' por nombre):' : '') + '</div>' +
     cands.map(m =>
       '<div style="display:flex;gap:10px;align-items:center;border:1px solid #e4e8f3;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:12.5px">' +
       '<div style="flex:1"><b>' + m.fecha + '</b> · ' + (m.banco || '') + '<br><span style="color:#666">' + (m.concepto || '').slice(0, 80) + '</span></div>' +
       '<b style="color:' + (Math.abs(m.importe - t) < 0.01 ? '#1a7a3f' : '#c96a10') + '">' + bkFmt(m.importe) + '</b>' +
       '<button onclick="cdfConciliar(' + m.id + ',' + idx + ')" style="padding:6px 12px;background:#1a2e6e;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">Conciliar</button></div>').join('') +
+    (remesas.length ? '<div style="font-size:12px;color:#888;margin:10px 0 8px">…o <b>dentro de una remesa</b> 🧩 (asignación de una parte de la partida):</div>' +
+      remesas.map(rm =>
+        '<div style="display:flex;gap:10px;align-items:center;border:1px solid #e8d9b5;background:#fffaf0;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:12.5px">' +
+        '<div style="flex:1"><b>' + rm.m.fecha + '</b> · ' + (rm.m.banco || '') + ' · remesa de <b>' + bkFmt(rm.m.importe) + '</b><br>' +
+        '<span style="color:#b45309">' + rm.texto + '</span></div>' +
+        '<button onclick="cdfAsignarEnRemesa(' + rm.m.id + ',' + idx + ',' + rm.hueco + ')" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">Meter aquí</button></div>').join('')
+      : '') +
     '<button onclick="document.getElementById(\'cdf-modal\').remove()" style="margin-top:8px;width:100%;padding:8px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;font-size:13px;cursor:pointer">Cancelar</button></div>';
   div.onclick = e => { if (e.target === div) div.remove(); };
   document.body.appendChild(div);
+}
+
+// Mete la factura DENTRO del desglose de una remesa: rellena el hueco "sin factura
+// localizada" si lo hay de su importe, o se añade contra el resto sin explicar.
+async function cdfAsignarEnRemesa(movId, idx, hueco) {
+  const f = facturasFiltC[idx];
+  const m = cdfMovs[movId];
+  if (!f || !m) return;
+  const entrada = { serie: f.Serie, numero: f.Number, importe: f.Totals.GrossAmount,
+    cliente: f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '' };
+  let nuevo;
+  if (hueco >= 0 && (m.conciliado || [])[hueco]) {
+    nuevo = m.conciliado.map((e, i) => i === hueco
+      ? Object.assign({}, e, entrada, { situacion: e.situacion || 'abonado' }) : e);
+  } else {
+    nuevo = (m.conciliado || []).concat([Object.assign({}, entrada, { situacion: 'abonado' })]);
+  }
+  const modal = document.getElementById('cdf-modal');
+  if (modal) modal.remove();
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: movId, facturas: nuevo })
+    });
+    if ((await r.json()).ok) { await refrescarEstadosCobro(); }
+    else alert('✗ No se pudo guardar');
+  } catch(e) { alert('✗ ' + e.message); }
 }
 
 async function cdfConciliar(movId, idx) {
