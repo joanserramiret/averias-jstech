@@ -697,7 +697,7 @@
             <input type="text" id="bk-buscar" oninput="bkRender()" placeholder="🔍 Buscar en todo: concepto, importe, cliente, factura..."
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:240px"/>
             <button onclick="bkCategorizar()" id="bk-cat" title="Clasificar nóminas, impuestos, comisiones, SS y aportaciones" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🏷 Categorizar</button>
-            <button onclick="bkAutoconciliar()" id="bk-auto" title="Conciliación automática: casa movimientos con facturas por importe y nombre del cliente" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">⚡ Conciliación automática</button>
+            <button onclick="bkAutoconciliar()" id="bk-auto" title="⚠ ADIVINA por importe y nombre — puede inventar. Úsala solo si luego repasas una a una. Lo fiable: 📎 ficheros del banco y 🔗 a mano" style="padding:6px 12px;background:#fff;border:2px dashed #c0392b;color:#c0392b;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">⚡ Autoconciliar ⚠</button>
             <button onclick="bkDuplicados()" title="Detectar y quitar movimientos repetidos (entraron por N43 y por el banco a la vez)" style="padding:6px 12px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🧹 Duplicados</button>
             <button onclick="bkCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
           </span>
@@ -897,6 +897,7 @@ function cerrarSesionContable() {
 function initContable() {
   try { cargarSaldos(); } catch(e) { console.warn(e); }
   try { setPeriod('year'); } catch(e) { console.warn(e); }  // año en curso entero: la caché del bridge lo hace ligero
+  try { cargarAliases(); } catch(e) {}  // 🪪 nombres aprendidos (Juan Ruiz = Amapola)
   try { renderCalendar(); } catch(e) { console.warn(e); }
   try { checkConexion(); } catch(e) { console.warn(e); }
   // Auto-load data on entry
@@ -1690,13 +1691,17 @@ async function cdfConciliar(movId, idx) {
     // Se AÑADE a lo que el movimiento ya tenga conciliado (un ingreso "FRAS VARIAS"
     // equivale a varias facturas) — nunca se machaca lo anterior
     const previo = ((cdfMovs[movId] || {}).conciliado) || [];
+    const entradaCdf = { serie: f.Serie, numero: f.Number,
+      importe: f.Totals.GrossAmount, cliente: f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '' };
     const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-      body: JSON.stringify({ id: movId, facturas: previo.concat([{ serie: f.Serie, numero: f.Number,
-        importe: f.Totals.GrossAmount, cliente: f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '' }]) })
+      body: JSON.stringify({ id: movId, facturas: previo.concat([entradaCdf]) })
     });
-    if ((await r.json()).ok) { await refrescarEstadosCobro(); }
+    if ((await r.json()).ok) {
+      await aliasOfrecerAprendizaje(cdfMovs[movId], [entradaCdf]);  // 🪪 aprender ordenante=fiscal
+      await refrescarEstadosCobro();
+    }
     else alert('✗ No se pudo conciliar');
   } catch(e) { alert('✗ ' + e.message); }
 }
@@ -3010,10 +3015,13 @@ function bkRender() {
       // Conciliación PARCIAL: lo asignado no llega al importe del movimiento → se ve y se puede seguir
       const restoConc = conc ? Math.round((Math.abs(m.importe) - conc.reduce((s, f) => s + (f.importe || 0), 0)) * 100) / 100 : 0;
       const esParcial = conc && restoConc > 0.01;
+      // Aviso de INVENTO: la conciliación viene de una deducción (⚡/🪄), no de documento ni mano
+      const esInvento = conc && conc.some(f => f.origen === 'deduccion' || /🪄|⚡/.test(f.cliente || ''));
+      const chipInvento = esInvento ? ' <span title="DEDUCIDO automáticamente (sin documento del banco): un invento hasta que lo verifiques — revísalo y rehazlo con 🔗 si no te cuadra" style="background:#fde8e8;color:#c0392b;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:800">⚡ INVENTO</span>' : '';
       const badge = conc
         ? (esParcial
-          ? '<span style="background:#fff4e0;color:#b45309;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">🧮 Parcial: ' + conc.map(f => f.serie + '-' + f.numero).join(', ') + ' · quedan ' + bkFmt(restoConc) + '</span>'
-          : '<span style="background:#e8f7ef;color:#1a7a3f;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">✅ ' + conc.map(f => f.serie + '-' + f.numero).join(', ') + '</span>')
+          ? '<span style="background:#fff4e0;color:#b45309;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">🧮 Parcial: ' + conc.map(f => f.serie + '-' + f.numero).join(', ') + ' · quedan ' + bkFmt(restoConc) + '</span>' + chipInvento
+          : '<span style="background:#e8f7ef;color:#1a7a3f;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">✅ ' + conc.map(f => f.serie + '-' + f.numero).join(', ') + '</span>' + chipInvento)
         : '<span style="background:#fff4e0;color:#c96a10;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">⏳ Pendiente</span>';
       const catBadge = m.categoria ? ' <span style="background:#e0f2fe;color:#0e7490;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700">🏷 ' + (BK_CATS[m.categoria] || m.categoria) + '</span>' : '';
       const acciones = conc
@@ -3158,15 +3166,75 @@ function bkNorm(s) {
     .replace(/\s+/g, ' ').trim();
 }
 
+// 🪪 ALIAS APRENDIDOS de los ponteos manuales: "JUAN RUIZ" (ordenante) → "AMAPOLA SL" (fiscal)
+let bkAliases = null;  // aliasNorm → nombreNorm
+
+async function cargarAliases() {
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/alias/listado', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    bkAliases = {};
+    ((await r.json()).alias || []).forEach(a => { bkAliases[bkNorm(a.alias)] = bkNorm(a.nombre); });
+  } catch(e) { bkAliases = {}; }
+}
+
+async function aliasGuardar(alias, nombre) {
+  try {
+    await fetch(BRIDGE_URL_C + '/alias/guardar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ alias: alias, nombre: nombre })
+    });
+    if (bkAliases === null) bkAliases = {};
+    if (nombre) bkAliases[bkNorm(alias)] = bkNorm(nombre);
+    else delete bkAliases[bkNorm(alias)];
+  } catch(e) { alert('✗ No pude guardar el alias: ' + e.message); }
+}
+
+// Saca el ORDENANTE de un concepto bancario ("ABONO TRANSFERENCIA DE JUAN RUIZ · ..." → "JUAN RUIZ")
+function bkExtraerOrdenante(concepto) {
+  const c = concepto || '';
+  const m = c.match(/(?:TRANSFERENCIA\s+(?:DE\s+|DORIGEN\s+)?|ADEUDO\s+RECIBO\s+|ABONO\s+TRANSFERENCIA\s+DE\s+)([A-ZÀ-Ü][A-ZÀ-Ü0-9 .,&'\-]{3,50}?)(?:\s*·|\s*$)/i);
+  return m ? m[1].trim() : '';
+}
+
 // ¿Aparece el nombre del cliente/proveedor en el concepto del movimiento?
+// 1º el nombre fiscal tal cual; 2º sus ALIAS aprendidos (Juan Ruiz = Amapola)
 function bkNombreEnConcepto(cliente, concepto) {
   const c = bkNorm(cliente), k = bkNorm(concepto);
   if (!c || !k) return false;
   if (k.includes(c)) return true;
   const toks = c.split(' ').filter(t => t.length >= 4);
-  if (!toks.length) return false;
-  const hits = toks.filter(t => k.includes(t)).length;
-  return hits >= Math.min(2, toks.length);
+  if (toks.length) {
+    const hits = toks.filter(t => k.includes(t)).length;
+    if (hits >= Math.min(2, toks.length)) return true;
+  }
+  // Alias aprendidos: ¿algún alias que apunte a ESTE nombre fiscal aparece en el concepto?
+  if (bkAliases) {
+    for (const al in bkAliases) {
+      if (bkAliases[al] === c && al && k.includes(al)) return true;
+    }
+  }
+  return false;
+}
+
+// 🪪 APRENDIZAJE: tras un ponteo manual donde el nombre fiscal NO aparece en el concepto,
+// se ofrece aprender el alias del ordenante (Juan Ruiz = Amapola) — para siempre
+async function aliasOfrecerAprendizaje(mov, entradas) {
+  if (!mov) return;
+  const vistos = new Set();
+  for (const e of (entradas || [])) {
+    const cli = (e.cliente || '').replace(/\s*[⚡✎🪄].*$/u, '').trim();
+    const serie = (e.serie || '').toUpperCase();
+    if (!cli || vistos.has(cli) || ['GASTOS', 'DESCUADRE', 'REMESA', 'REF', '—'].includes(serie)) continue;
+    vistos.add(cli);
+    if (bkNombreEnConcepto(cli, mov.concepto)) continue;  // ya casa (directo o por alias previo)
+    const sug = bkExtraerOrdenante(mov.concepto);
+    const alias = prompt('🪪 El banco dice:\n«' + (mov.concepto || '').slice(0, 90) + '»\n\n…pero tú lo has casado con "' + cli +
+      '".\n\n¿Quién es el ORDENANTE? Aprenderé que ese nombre = ' + cli +
+      ' y a partir de ahora casará solo en transferencias, recibos y remesas.\n(Deja vacío para no aprender nada)', sug);
+    if (alias && alias.trim().length >= 3) {
+      await aliasGuardar(alias.trim(), cli);
+    }
+  }
 }
 
 let bkUsadas = new Set();  // facturas ya conciliadas en algún movimiento
@@ -3245,8 +3313,8 @@ function bkModalRender() {
   }
   if (bkSoloSeleccion && !q) {
     cands = cands.filter(c => !!bkSeleccion[c.clave]);
-    banner = '<div style="padding:8px 10px;background:#fff3e0;border-bottom:1px solid #f0d9b5;font-size:12px;color:#b45309">' +
-      '🧩 Mostrando solo la propuesta (' + cands.length + ' facturas) · ' +
+    banner = '<div style="padding:8px 10px;background:#fde8e8;border-bottom:1px solid #e0b0b0;font-size:12px;color:#c0392b">' +
+      '⚠ Propuesta DEDUCIDA por suma de importes (' + cands.length + ' facturas) — un INVENTO hasta que verifiques los nombres · ' +
       '<a onclick="bkSoloSeleccion=false;bkModalRender()" style="cursor:pointer;text-decoration:underline;font-weight:700">ver todas las candidatas</a></div>';
   }
   // Orden útil: 1º las MARCADAS (que no se pierdan en la inmensidad), 2º las que cuadran
@@ -3407,6 +3475,7 @@ async function bkGuardarConciliacion() {
     });
     const d = await r.json();
     if (!d.ok) throw new Error('No se pudo guardar');
+    await aliasOfrecerAprendizaje(bkMovActual, lista);  // 🪪 aprender "ordenante = nombre fiscal"
     bkCerrarModal();
     bkCargar();
     refrescarEstadosCobro();  // Resumen, badges de facturas y cartera, EN VIVO
@@ -3520,6 +3589,19 @@ async function bkDesconciliar(id) {
 
 async function bkAutoconciliar() {
   const btn = document.getElementById('bk-auto');
+  // ⚠⚠ ZONA "VAMOS A CONTAR MENTIRAS, TRALARÁ" ⚠⚠ (a petición de Joan, 2026-06)
+  // La autoconciliación ADIVINA por importe y nombre. Ya montó un drama una vez
+  // (facturas inventadas, cuotas mensuales cruzadas). Solo pasa con doble aviso.
+  if (!confirm('⚠️ AVISO 1 de 2 — "Vamos a contar mentiras, tralará" 🎶\n\n' +
+      'La autoconciliación ADIVINA casando importes y nombres. NO lee ningún documento del banco.\n' +
+      'Puede emparejar facturas equivocadas (cuotas mensuales del mismo importe, clientes parecidos...) ' +
+      'y dar por cobrado lo que no lo está.\n\n' +
+      'Lo FIABLE es: 📎 ficheros del banco en Remesas y 🔗 conciliación manual.\n\n¿Seguro que quieres que adivine?')) return;
+  if (!confirm('⚠️ AVISO 2 de 2 — última oportunidad de huir 🏃\n\n' +
+      'Si sigues, REVISA después UNA A UNA cada conciliación que haga (badge ✅ en Tesorería, ' +
+      'chivato 🚨 de duplicadas en Remesas y 🩺 Auditar cartera son tus amigos).\n' +
+      'Todo lo que haga es reversible (✕ Deshacer), pero el susto en el dashboard te lo llevas igual.\n\n' +
+      '¿Adelante con las mentiras, tralará?')) return;
   // Fuentes: facturas de Ágora (abonos) y de proveedor (cargos) — cada movimiento usa la suya
 
   // Facturas ya usadas en alguna conciliación (de cualquier movimiento)
@@ -3551,17 +3633,27 @@ async function bkAutoconciliar() {
   for (const m of pendientes) {
     const objetivo = Math.abs(m.importe);
     const esDevol = bkEsDevolCliente(m);  // "IMP.R.D.SEPA DEVOLUCION RECIBO" y similares
-    // Las devoluciones se casan con la MISMA factura de la remesa (que está "usada" a propósito)
-    const libres = esDevol ? bkCandidatos(m) : bkCandidatos(m).filter(c => !usadas.has(bkNormClave(c.clave)));
+    // ══ EL NOMBRE FISCAL MANDA Y ES INAMOVIBLE (doctrina Joan, 2026-06) ══
+    // Solo son candidatas las facturas cuyo CLIENTE aparece en el concepto del banco.
+    // Si el concepto no trae nombre reconocible, NO se deduce nada (a mano con 🔗).
+    // El importe ya NO basta: era la fuente de los inventos (mismo importe, cliente distinto).
+    const libres = (esDevol ? bkCandidatos(m) : bkCandidatos(m).filter(c => !usadas.has(bkNormClave(c.clave))))
+      .filter(c => bkNombreEnConcepto(c.cliente, m.concepto));
     const matches = libres.filter(c => Math.abs(c.importe - objetivo) < 0.01);
     let facturasElegidas = null;
     if (matches.length === 1) {
       facturasElegidas = [matches[0]];
-      if (esDevol) devolsCasadas++;
+      if (esDevol) devolsCasadas++; else porNombre++;
     } else if (matches.length > 1) {
-      // Mismo importe en varias facturas → desempatar por nombre en el concepto del banco
-      const conNombre = matches.filter(c => bkNombreEnConcepto(c.cliente, m.concepto));
-      if (conNombre.length === 1) { facturasElegidas = [conNombre[0]]; porNombre++; }
+      // Mismo cliente Y mismo importe en varias facturas (cuota mensual):
+      // gana la más cercana ANTERIOR a la fecha del movimiento
+      const ref = m.fecha || '';
+      const cercana = matches.slice().sort((a, b) => {
+        const va = a.fecha && ref ? Math.abs(new Date(ref) - new Date(a.fecha)) + (a.fecha > ref ? 1e12 : 0) : 9e15;
+        const vb = b.fecha && ref ? Math.abs(new Date(ref) - new Date(b.fecha)) + (b.fecha > ref ? 1e12 : 0) : 9e15;
+        return va - vb;
+      })[0];
+      if (cercana) { facturasElegidas = [cercana]; porNombre++; if (esDevol) devolsCasadas++; }
       else dudosos++;
     } else {
       // Sin importe exacto → ¿paga varias facturas de un mismo cliente/proveedor citado en el concepto?
@@ -3615,7 +3707,9 @@ async function bkAutoconciliar() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
           body: JSON.stringify({ id: m.id, facturas: facturasElegidas.map(c => {
-            const f = { serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente };
+            // TODO lo que casa el ⚡ es una DEDUCCIÓN (sin documento) → marcado como invento
+            const f = { serie: c.serie, numero: c.numero, importe: c.importe,
+              cliente: (c.cliente || '') + ' ⚡', origen: 'deduccion' };
             if (esDevol) f.situacion = 'devuelto';  // el cargo de devolución marca la factura ↩
             return f;
           }) })
@@ -3638,8 +3732,8 @@ async function bkAutoconciliar() {
     }
   }
   btn.disabled = false;
-  alert('⚡ Autoconciliación:\n· ' + hechos + ' movimiento(s) conciliado(s)' +
-        (porNombre ? '\n   · ' + porNombre + ' desempatados por nombre del cliente 🪪' : '') +
+  alert('⚡ Autoconciliación (TODO marcado como ⚡ INVENTO — revísalo):\n· ' + hechos + ' movimiento(s) conciliado(s)' +
+        (porNombre ? '\n   · ' + porNombre + ' por NOMBRE FISCAL + importe 🪪 (el nombre manda)' : '') +
         (porGrupo ? '\n   · ' + porGrupo + ' por suma de facturas del mismo cliente 👥' : '') +
         (devolsCasadas ? '\n   · ' + devolsCasadas + ' devolución(es) de recibo casadas con su factura ↩' : '') +
         (recobros ? '\n   · ' + recobros + ' recobro(s) de devueltas por transferencia (con gastos) 💪' : '') +
@@ -3709,7 +3803,7 @@ async function bkRemesas() {
       const estado = facts.length
         ? (Math.abs(resto) < 0.01
             ? '<span style="color:#1b7a3d;font-weight:700">✓ desglosada</span>' +
-              (esPropuesta ? ' <span style="color:#b45309;font-size:10.5px" title="Cuadre manual, sin fichero del banco — editable">🧮 manual</span>' : '')
+              (esPropuesta ? ' <span style="color:#c0392b;font-size:10.5px;font-weight:800" title="Cuadre SIN fichero del banco: las facturas se eligieron a ojo (propuesta/manual) — un invento razonado hasta que lo verifiques con el documento. Editable con ✏">🧮 SIN RESPALDO (invento)</span>' : '')
             : '<span style="color:#c96a10;font-weight:700">⚠ quedan ' + bkFmt(resto) + ' sin explicar</span>')
         : '<span style="color:#c0392b;font-weight:700">⏳ sin desglosar</span>';
       const detalle = facts.length
@@ -3935,7 +4029,7 @@ async function remesasImportarPDF(files) {
         if (Math.abs(resto) >= 0.01) {
           const sol = magiaCliente(rec, resto);
           if (sol && sol.length) {
-            sol.forEach(c => { usadasGlob.add(bkNormClave(c.clave)); entradas.push({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: rec.deudor + ' 🪄', situacion: rec.situacion }); });
+            sol.forEach(c => { usadasGlob.add(bkNormClave(c.clave)); entradas.push({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: rec.deudor + ' 🪄 deducida (invento)', origen: 'deduccion', situacion: rec.situacion }); });
             if (!halladas.length) conFactura++;
             return;
           }
@@ -3952,15 +4046,17 @@ async function remesasImportarPDF(files) {
       if (m1.length) {
         const elegido = m1.length === 1 ? m1[0] : masCercana(m1);
         usadasGlob.add(bkNormClave(elegido.clave));
+        const dudosa = m1.length > 1;  // entre varias del mismo importe, ELEGIMOS nosotros = invento
         entradas.push({ serie: elegido.serie, numero: elegido.numero, importe: rec.importe,
-          cliente: rec.deudor + (m1.length > 1 ? ' 🪄' : ''), situacion: rec.situacion });
+          cliente: rec.deudor + (dudosa ? ' 🪄 deducida (invento)' : ''),
+          origen: dudosa ? 'deduccion' : undefined, situacion: rec.situacion });
         conFactura++;
         return;
       }
       // 3) 🪄 MAGIA: combinación de facturas del MISMO cliente que suman el recibo
       const sol = magiaCliente(rec, rec.importe);
       if (sol && sol.length) {
-        sol.forEach(c => { usadasGlob.add(bkNormClave(c.clave)); entradas.push({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: rec.deudor + ' 🪄', situacion: rec.situacion }); });
+        sol.forEach(c => { usadasGlob.add(bkNormClave(c.clave)); entradas.push({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: rec.deudor + ' 🪄 deducida (invento)', origen: 'deduccion', situacion: rec.situacion }); });
         conFactura++;
         return;
       }
@@ -4489,7 +4585,8 @@ async function remesaDeducir(id) {
               : bkBuscarDesglose(grupo, f.importe || 0);
     if (sol && sol.length) {
       sol.forEach(c => { usadas.add(bkNormClave(c.clave)); nuevo.push({ serie: c.serie, numero: c.numero,
-        importe: sol.length === 1 ? f.importe : c.importe, cliente: (f.cliente || '') + ' 🪄', situacion: f.situacion || 'abonado' }); });
+        importe: sol.length === 1 ? f.importe : c.importe, cliente: (f.cliente || '') + ' 🪄 deducida (invento)',
+        origen: 'deduccion', situacion: f.situacion || 'abonado' }); });
       resueltas++;
     } else {
       nuevo.push(f);
