@@ -2938,14 +2938,17 @@ async function bkAutoconciliar() {
   }
 
   btn.disabled = true;
-  let hechos = 0, dudosos = 0, remesas = 0, porNombre = 0, porGrupo = 0;
+  let hechos = 0, dudosos = 0, remesas = 0, porNombre = 0, porGrupo = 0, devolsCasadas = 0, recobros = 0;
   for (const m of pendientes) {
     const objetivo = Math.abs(m.importe);
-    const libres = bkCandidatos(m).filter(c => !usadas.has(bkNormClave(c.clave)));
+    const esDevol = bkEsDevolCliente(m);  // "IMP.R.D.SEPA DEVOLUCION RECIBO" y similares
+    // Las devoluciones se casan con la MISMA factura de la remesa (que está "usada" a propósito)
+    const libres = esDevol ? bkCandidatos(m) : bkCandidatos(m).filter(c => !usadas.has(bkNormClave(c.clave)));
     const matches = libres.filter(c => Math.abs(c.importe - objetivo) < 0.01);
     let facturasElegidas = null;
     if (matches.length === 1) {
       facturasElegidas = [matches[0]];
+      if (esDevol) devolsCasadas++;
     } else if (matches.length > 1) {
       // Mismo importe en varias facturas → desempatar por nombre en el concepto del banco
       const conNombre = matches.filter(c => bkNombreEnConcepto(c.cliente, m.concepto));
@@ -2965,6 +2968,23 @@ async function bkAutoconciliar() {
         const sol = bkBuscarDesglose(grupo, objetivo);
         if (sol && sol.length) { facturasElegidas = sol; porGrupo++; break; }
       }
+      // RECOBRO de un recibo devuelto por TRANSFERENCIA (factura + gastos de devolución
+      // repercutidos, o método de pago mal puesto en Ágora): factura DEVUELTA del cliente
+      // citado en el concepto, con diferencia pequeña (los gastos)
+      if (!facturasElegidas && m.importe > 0 && bkCobradasBanco && bkCobradasBanco.devueltas) {
+        const devs = bkCandidatos(m).filter(c =>
+          bkCobradasBanco.devueltas.has(bkNormClave(c.clave)) &&
+          !bkCobradasBanco.cobradas.has(bkNormClave(c.clave)) &&
+          bkNombreEnConcepto(c.cliente, m.concepto) &&
+          objetivo - c.importe >= -0.01 && objetivo - c.importe <= 25);
+        if (devs.length === 1) {
+          const difG = Math.round((objetivo - devs[0].importe) * 100) / 100;
+          facturasElegidas = [devs[0]];
+          if (difG >= 0.01) facturasElegidas.push({ serie: 'GASTOS', numero: 'gastos devolución repercutidos',
+            importe: difG, cliente: devs[0].cliente });
+          recobros++;
+        }
+      }
       // Las remesas NO se adivinan por combinación de importes (inventaba desgloses falsos
       // que secuestraban facturas) — se desglosan con el listado real del banco: pestaña 🧩 Remesas → 📎 PDF
     }
@@ -2973,9 +2993,16 @@ async function bkAutoconciliar() {
         const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-          body: JSON.stringify({ id: m.id, facturas: facturasElegidas.map(c => ({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente })) })
+          body: JSON.stringify({ id: m.id, facturas: facturasElegidas.map(c => {
+            const f = { serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente };
+            if (esDevol) f.situacion = 'devuelto';  // el cargo de devolución marca la factura ↩
+            return f;
+          }) })
         });
-        if ((await r.json()).ok) { hechos++; facturasElegidas.forEach(c => usadas.add(c.clave)); }
+        if ((await r.json()).ok) {
+          hechos++;
+          if (!esDevol) facturasElegidas.forEach(c => usadas.add(bkNormClave(c.clave)));  // la devuelta sigue en su remesa
+        }
       } catch(e) { /* seguir con el resto */ }
     }
   }
@@ -2983,6 +3010,8 @@ async function bkAutoconciliar() {
   alert('⚡ Autoconciliación:\n· ' + hechos + ' movimiento(s) conciliado(s)' +
         (porNombre ? '\n   · ' + porNombre + ' desempatados por nombre del cliente 🪪' : '') +
         (porGrupo ? '\n   · ' + porGrupo + ' por suma de facturas del mismo cliente 👥' : '') +
+        (devolsCasadas ? '\n   · ' + devolsCasadas + ' devolución(es) de recibo casadas con su factura ↩' : '') +
+        (recobros ? '\n   · ' + recobros + ' recobro(s) de devueltas por transferencia (con gastos) 💪' : '') +
         (remesas ? '\n   · ' + remesas + ' remesa(s) de recibos desglosada(s) 🧩' : '') +
         '\n· ' + dudosos + ' con varias facturas candidatas y sin nombre en el concepto (a mano)' +
         '\n· ' + (pendientes.length - hechos - dudosos) + ' sin pareja');
