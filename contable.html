@@ -1380,7 +1380,17 @@ function actualizarDashboard() {
     if (t > 0 && !anulada) { nAnio++; if (mesF === mesActual) nMes++; }  // ni devoluciones ni anuladas
 
     // COBROS / PENDIENTES: solo ventas reales vivas; anuladas, devoluciones y tickets T/TD/D fuera
-    if (t <= 0 || anulada || /^(T|TD|D)$/i.test(f.Serie || '')) return;
+    if (t <= 0 || anulada || /^(T|TD|D)$/i.test(f.Serie || '')) {
+      // ...pero las DEVOLUCIONES (FD y cía., no anuladas) sí RESTAN en los cobros por método
+      if (t < 0 && !anulada && !/^(T|TD|D)$/i.test(f.Serie || '')) {
+        (f.Payments || []).forEach(p => {
+          const m = p.MethodName || 'Otros';
+          if (!pagosTotales[m]) pagosTotales[m] = { total: 0, count: 0 };
+          pagosTotales[m].total -= Math.abs(p.Amount || p.PaidAmount || 0);
+        });
+      }
+      return;
+    }
 
     const pagos = f.Payments || [];
     const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
@@ -1452,6 +1462,7 @@ function filtrarFacturasC() {
   const hoy = new Date();
 
   facturasFiltC = todasFacturasC.filter(f => {
+    if (f._tipo !== 'factura') return false;  // los ALBARANES (serie A) no son facturas emitidas
     // Tickets simplificados y sus devoluciones (T/TD/D): conversiones internas, fuera de los listados
     if (/^(T|TD|D)$/i.test(f.Serie || '')) return false;
     if (!fcEnPeriodo(f)) return false;  // el listado obedece al período de la barra
@@ -2240,12 +2251,14 @@ function actualizarCobros() {
   const enPeriodo = fcEnPeriodo;
   const metodos = {};
   const hoy = new Date();
-  todasFacturasC.filter(enPeriodo).forEach(f => {
+  todasFacturasC.filter(f => f._tipo === 'factura' && enPeriodo(f)).forEach(f => {
+    const esDevolucion = (f.Totals ? f.Totals.GrossAmount : 0) < 0;  // FD, D...: RESTAN del cobrado
     const pagos = f.Payments || [];
     pagos.forEach(p => {
       const m = p.MethodName || 'Otros';
       if (!metodos[m]) metodos[m] = { total: 0, count: 0 };
-      metodos[m].total += Math.abs(p.Amount || p.PaidAmount || 0);
+      const v = Math.abs(p.Amount || p.PaidAmount || 0);
+      metodos[m].total += esDevolucion ? -v : v;  // cobros por método NETOS
       metodos[m].count++;
     });
   });
