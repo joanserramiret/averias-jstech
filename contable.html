@@ -1559,10 +1559,14 @@ async function conciliarDesdeFactura(idx) {
       if (hueco >= 0) return { m, tipo: 'hueco', hueco, texto: 'recibo "sin factura localizada" de ' + bkFmt(t) + ' — encaja exacto' };
       if (!facts.length && m.importe >= t - 0.01) return { m, tipo: 'vacia', hueco: -1, texto: 'sin desglosar — la factura entrará como desglose parcial' };
       if (resto >= t - 0.01) return { m, tipo: 'resto', hueco: -1, texto: 'quedan ' + bkFmt(resto) + ' sin explicar' };
-      return null;
+      // No cabe por resto… pero LA VERDAD MANUAL PREVALECE: se ofrece igualmente con aviso
+      // (si fuerzas, la remesa quedará sobre-explicada — revisa el desglose y quita lo que sobre con ✕)
+      return { m, tipo: 'nocabe', hueco: -1,
+        texto: '⚠ no cabe: ' + (resto > 0 ? 'solo quedan ' + bkFmt(resto) + ' sin explicar' : 'ya está cuadrada') +
+               ' — al forzar quedará sobre-explicada (revisa el desglose con ✕)' };
     }).filter(Boolean)
-    .sort((a, b) => (a.tipo === 'hueco' ? 0 : a.tipo === 'resto' ? 1 : 2) - (b.tipo === 'hueco' ? 0 : b.tipo === 'resto' ? 1 : 2))
-    .slice(0, 8);
+    .sort((a, b) => ({ hueco: 0, resto: 1, vacia: 2, nocabe: 3 })[a.tipo] - ({ hueco: 0, resto: 1, vacia: 2, nocabe: 3 })[b.tipo])
+    .slice(0, 10);
 
   if (!cands.length && !remesas.length) {
     alert('🔗 ' + num + ' (' + t.toFixed(2) + '€ · ' + cliente + ')\n\nNo encuentro ni abonos pendientes que cuadren ni remesas con sitio.\n\n' +
@@ -1585,10 +1589,10 @@ async function conciliarDesdeFactura(idx) {
       '<button onclick="cdfConciliar(' + m.id + ',' + idx + ')" style="padding:6px 12px;background:#1a2e6e;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">Conciliar</button></div>').join('') +
     (remesas.length ? '<div style="font-size:12px;color:#888;margin:10px 0 8px">…o <b>dentro de una remesa</b> 🧩 (asignación de una parte de la partida):</div>' +
       remesas.map(rm =>
-        '<div style="display:flex;gap:10px;align-items:center;border:1px solid #e8d9b5;background:#fffaf0;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:12.5px">' +
+        '<div style="display:flex;gap:10px;align-items:center;border:1px solid ' + (rm.tipo === 'nocabe' ? '#e0b0b0' : '#e8d9b5') + ';background:' + (rm.tipo === 'nocabe' ? '#fdf3f3' : '#fffaf0') + ';border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:12.5px">' +
         '<div style="flex:1"><b>' + rm.m.fecha + '</b> · ' + (rm.m.banco || '') + ' · remesa de <b>' + bkFmt(rm.m.importe) + '</b><br>' +
-        '<span style="color:#b45309">' + rm.texto + '</span></div>' +
-        '<button onclick="cdfAsignarEnRemesa(' + rm.m.id + ',' + idx + ',' + rm.hueco + ')" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">Meter aquí</button></div>').join('')
+        '<span style="color:' + (rm.tipo === 'nocabe' ? '#c0392b' : '#b45309') + '">' + rm.texto + '</span></div>' +
+        '<button onclick="cdfAsignarEnRemesa(' + rm.m.id + ',' + idx + ',' + rm.hueco + ')" style="padding:6px 12px;background:' + (rm.tipo === 'nocabe' ? '#c0392b' : '#e87e1a') + ';color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">' + (rm.tipo === 'nocabe' ? 'Forzar' : 'Meter aquí') + '</button></div>').join('')
       : '') +
     '<button onclick="document.getElementById(\'cdf-modal\').remove()" style="margin-top:8px;width:100%;padding:8px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;font-size:13px;cursor:pointer">Cancelar</button></div>';
   div.onclick = e => { if (e.target === div) div.remove(); };
@@ -3520,7 +3524,9 @@ async function bkRemesas() {
             return '<tr' + (dev ? ' style="color:#c0392b;font-weight:700"' : '') + '><td>' + fra + '</td><td>' +
               (f.cliente || '—') + (dev ? ' ↩ DEVUELTO' : '') +
               '</td><td style="text-align:right">' + bkFmt(f.importe) + '</td>' +
-              '<td style="text-align:right;width:26px"><button onclick="remesaQuitarRecibo(' + m.id + ',' + fi + ')" title="Quitar SOLO este recibo del desglose (la factura queda libre; el resto del desglose no se toca)" style="padding:1px 7px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:5px;font-size:10.5px;cursor:pointer">✕</button></td></tr>';
+              '<td style="text-align:right;width:54px;white-space:nowrap">' +
+              '<button onclick="remesaToggleDevuelto(' + m.id + ',' + fi + ')" title="' + (dev ? 'Quitar la marca de devuelto: el recibo vuelve a contar como cobrado' : 'Marcar este recibo como DEVUELTO a mano (el banco no siempre avisa): la factura vuelve a Pendiente para reclamar') + '" style="padding:1px 7px;background:' + (dev ? '#e8f7ef' : '#fff3e0') + ';border:1px solid ' + (dev ? '#a7d7b8' : '#e8b27a') + ';color:' + (dev ? '#1b7a3d' : '#b45309') + ';border-radius:5px;font-size:10.5px;cursor:pointer">' + (dev ? '✓' : '↩') + '</button> ' +
+              '<button onclick="remesaQuitarRecibo(' + m.id + ',' + fi + ')" title="Quitar SOLO este recibo del desglose (la factura queda libre; el resto del desglose no se toca)" style="padding:1px 7px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:5px;font-size:10.5px;cursor:pointer">✕</button></td></tr>';
           }).join('') + '</table>' +
           '<div style="text-align:right;margin-top:6px">' +
           (facts.some(x => x.serie === '—') ? '<button onclick="remesaDeducir(' + m.id + ')" title="Deducir las facturas de los recibos sin localizar, por cliente e importes" style="padding:4px 10px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px">🪄 Deducir facturas</button>' : '') +
@@ -3927,6 +3933,38 @@ async function remCuadreGuardar() {
       bkRemesas();
     } else alert('✗ No se pudo guardar');
   } catch(e) { alert('✗ ' + e.message); }
+}
+
+// ↩ Marca/desmarca a MANO un recibo como devuelto dentro de su remesa (el Sabadell no
+// siempre avisa). Devuelto → la factura vuelve a Pendiente (a reclamar) hasta nuevo cobro.
+async function remesaToggleDevuelto(movId, fi) {
+  const m = (bkRemesasDatos.remesas || []).find(x => x.id === movId);
+  if (!m || !m.conciliado || !m.conciliado[fi]) return;
+  const e = m.conciliado[fi];
+  if ((e.serie || '').toUpperCase() === 'REF') {
+    alert('Es un grupo de referencias (varias facturas juntas). Sepáralo primero con ✎ y marca la devolución en la factura concreta.');
+    return;
+  }
+  const aDevuelto = (e.situacion || 'abonado') !== 'devuelto';
+  const nombre = e.serie === '—' ? 'recibo sin factura' : (e.serie || '') + '-' + (e.numero != null ? e.numero : '');
+  if (!confirm(aDevuelto
+    ? '↩ ¿Marcar como DEVUELTO?\n\n' + nombre + ' · ' + (e.cliente || '') + ' · ' + bkFmt(e.importe || 0) +
+      '\n\nSaldrá en ROJO en la remesa y la factura volverá a Pendiente (a reclamar) hasta que llegue un nuevo cobro válido.'
+    : '✓ ¿Quitar la marca de devuelto?\n\n' + nombre + ' · ' + (e.cliente || '') +
+      '\n\nEl recibo volverá a contar como abonado y la factura como Cobrada.')) return;
+  const nuevo = m.conciliado.map((x, i) => i === fi
+    ? Object.assign({}, x, { situacion: aDevuelto ? 'devuelto' : 'abonado' }) : x);
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: movId, facturas: nuevo })
+    });
+    if ((await r.json()).ok) {
+      refrescarEstadosCobro();
+      bkRemesas();
+    } else alert('✗ No se pudo guardar');
+  } catch(err) { alert('✗ ' + err.message); }
 }
 
 // ✕ Quita UN solo recibo de un desglose, sin tocar el resto (cirugía, no demolición).
