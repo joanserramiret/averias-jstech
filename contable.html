@@ -732,6 +732,9 @@
           <span>Facturas recibidas y albaranes (compras) <span style="font-weight:400;font-size:12px;color:var(--texto-suave)">(Dropbox · CONTABLE JS-TECH / 0 PROVEÏDORS)</span></span>
           <span style="display:flex;gap:8px;align-items:center">
             <select id="pv-anio" onchange="pvCargar()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit"></select>
+            <input type="date" id="pv-desde" onchange="pvRender()" title="Mostrar solo documentos desde esta fecha" style="padding:5px 8px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit"/>
+            <span style="color:var(--texto-suave);font-size:11px">—</span>
+            <input type="date" id="pv-hasta" onchange="pvRender()" title="Mostrar solo documentos hasta esta fecha" style="padding:5px 8px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit"/>
             <select id="pv-filtro" onchange="pvRender()" style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit">
               <option value="">Todos</option>
               <option value="revisar">⚠ Para revisar</option>
@@ -4891,6 +4894,19 @@ function pvRender() {
       return enContenido ? enContenido.has(anio + '/' + a.rel) : false;
     });
     if (q.length >= 3 && pvContenido.q !== q) pvBuscaContenido(q, anio);
+  }
+  // Cribado por FECHA del documento (la leída de dentro; si no la hay, la de modificación del archivo)
+  const pvD = (document.getElementById('pv-desde') || {}).value || '';
+  const pvH = (document.getElementById('pv-hasta') || {}).value || '';
+  if (pvD || pvH) {
+    lista = lista.filter(a => {
+      const dat = pvDatos[anio + '/' + a.rel] || {};
+      const fch = dat.fecha || (a.modificado || '').slice(0, 10);
+      if (!fch) return true;  // sin fecha conocida: que no desaparezca (mejor verla y corregirla)
+      if (pvD && fch < pvD) return false;
+      if (pvH && fch > pvH) return false;
+      return true;
+    });
   }
   if (filtro) {
     lista = lista.filter(a => {
