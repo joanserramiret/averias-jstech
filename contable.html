@@ -1154,6 +1154,42 @@ async function refrescarEstadosCobro() {
   try { actualizarCobros(); } catch(e) {}
 }
 
+// Marca una factura como DEVUELTA dentro de la remesa donde figura como abonada
+// (el fichero de presentación del Sabadell la daba por cobrada — esto lo corrige)
+async function bkMarcarDevueltaEnOrigen(clave, importe, deudor) {
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const movs = (await r.json()).movimientos || [];
+    const origen = movs.find(mm => mm.importe > 0 && (mm.conciliado || []).length &&
+      bkClavesDeConciliado(mm.conciliado).some(([k, f]) => k === clave && (f.situacion || 'abonado') !== 'devuelto'));
+    if (!origen) return false;
+    const nuevoConc = [];
+    (origen.conciliado || []).forEach(e => {
+      if ((e.serie || '').toUpperCase() === 'REF') {
+        const refsE = String(e.numero || '').match(/[A-Z]+\s*-?\s*\d+/gi) || [];
+        if (refsE.some(rf => bkNormClave(rf) === clave)) {
+          const resto = refsE.filter(rf => bkNormClave(rf) !== clave);
+          if (resto.length) nuevoConc.push(Object.assign({}, e, { numero: resto.join(' ') }));
+          nuevoConc.push({ serie: clave.split('-')[0], numero: clave.split('-')[1],
+            importe: importe, cliente: deudor || '', situacion: 'devuelto' });
+          return;
+        }
+        nuevoConc.push(e);
+        return;
+      }
+      if (bkNormClave((e.serie || '') + '-' + (e.numero || '')) === clave) {
+        nuevoConc.push(Object.assign({}, e, { situacion: 'devuelto' }));
+      } else nuevoConc.push(e);
+    });
+    await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: origen.id, facturas: nuevoConc })
+    });
+    return true;
+  } catch(e) { return false; }
+}
+
 // ¿Es este cargo una devolución de recibo de CLIENTE? (no un pago a proveedor)
 function bkEsDevolCliente(m) {
   return !!(m && m.importe < 0 && /DEVOL|DEVUELT|IMPAGAD/i.test(m.concepto || '') &&
@@ -3106,6 +3142,13 @@ async function bkAutoconciliar() {
         if ((await r.json()).ok) {
           hechos++;
           if (!esDevol) facturasElegidas.forEach(c => usadas.add(bkNormClave(c.clave)));  // la devuelta sigue en su remesa
+          else {
+            // y además la remesa de origen pasa a mostrarla en ROJO ↩ (corrige el "abonado" del Sabadell)
+            for (const c of facturasElegidas) {
+              if (c.serie === 'GASTOS') continue;
+              await bkMarcarDevueltaEnOrigen(bkNormClave(c.serie + '-' + c.numero), c.importe, c.cliente);
+            }
+          }
         }
       } catch(e) { /* seguir con el resto */ }
     }
