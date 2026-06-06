@@ -619,12 +619,12 @@
           <div class="kpi-value" id="bk-kpi-pendientes">—</div>
           <div class="kpi-sub" id="bk-kpi-rango"></div>
         </div>
-        <div class="kpi-card verde">
+        <div class="kpi-card verde" onclick="bkFiltrarSigno('abonos')" style="cursor:pointer" title="Ver solo los cobros pendientes de explicar e interactuar con ellos">
           <div class="kpi-icon">⬇</div>
           <div class="kpi-label">Cobros por explicar <span style="font-weight:400;font-size:10px">(↔ emitidas y remesas)</span></div>
           <div class="kpi-value verde" id="bk-kpi-abonos">—</div>
         </div>
-        <div class="kpi-card naranja">
+        <div class="kpi-card naranja" onclick="bkFiltrarSigno('cargos')" style="cursor:pointer" title="Ver solo los pagos pendientes de explicar e interactuar con ellos">
           <div class="kpi-icon">⬆</div>
           <div class="kpi-label">Pagos por explicar <span style="font-weight:400;font-size:10px">(↔ facturas recibidas)</span></div>
           <div class="kpi-value naranja" id="bk-kpi-cargos">—</div>
@@ -2496,11 +2496,24 @@ function bkActualizarBancos() {
     bancos.map(b => '<option value="' + b + '"' + (b === actual ? ' selected' : '') + '>' + b + '</option>').join('');
 }
 
+// Filtro por signo desde los KPIs: clic en "Cobros/Pagos por explicar" → solo esos, listos para trabajar
+let bkSigno = '';
+function bkFiltrarSigno(signo) {
+  bkSigno = signo;
+  const sel = document.getElementById('bk-filtro-estado');
+  if (sel) sel.value = 'pendiente';
+  bkCargar();
+  const lista = document.getElementById('bk-lista');
+  if (lista) lista.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function bkRender() {
   const listEl = document.getElementById('bk-lista');
   const q = (document.getElementById('bk-buscar').value || '').toLowerCase();
   const banco = (document.getElementById('bk-filtro-banco') || {}).value || '';
   let lista = bkMovs;
+  if (bkSigno === 'abonos') lista = lista.filter(m => m.importe > 0);
+  if (bkSigno === 'cargos') lista = lista.filter(m => m.importe < 0);
   if (banco) lista = lista.filter(m => m.banco === banco);
   if (q) lista = lista.filter(m => {
     // Buscador global: concepto, referencia, banco, fecha, importe, categoría, estado y facturas/clientes conciliados
@@ -2531,7 +2544,9 @@ function bkRender() {
   const th = (c, txt, extra) => '<th style="padding:6px;cursor:pointer;user-select:none;' + (extra || '') +
     '" onclick="bkOrdenarPor(\'' + c + '\')" title="Ordenar por ' + txt + '">' + txt + flecha(c) + '</th>';
 
-  listEl.innerHTML = '<div style="font-size:11px;color:var(--texto-suave);margin-bottom:4px">' + lista.length + ' movimiento(s)</div>' +
+  listEl.innerHTML = '<div style="font-size:11px;color:var(--texto-suave);margin-bottom:4px">' + lista.length + ' movimiento(s)' +
+    (bkSigno ? ' · <span style="background:#fff3e0;border:1px solid #e8b27a;color:#b45309;border-radius:6px;padding:1px 8px;font-weight:700">solo ' + (bkSigno === 'abonos' ? 'cobros ⬇' : 'pagos ⬆') + ' <a onclick="bkSigno=\'\';bkRender()" style="cursor:pointer;text-decoration:underline">✕ quitar</a></span>' : '') +
+    '</div>' +
     '<table style="width:100%;border-collapse:collapse;font-size:12.5px">' +
     '<tr style="text-align:left;color:#888;border-bottom:1.5px solid #eee">' +
     th('fecha', 'Fecha') + th('banco', 'Banco') + th('concepto', 'Concepto') +
@@ -2684,6 +2699,35 @@ function bkNombreEnConcepto(cliente, concepto) {
 }
 
 let bkUsadas = new Set();  // facturas ya conciliadas en algún movimiento
+let bkCandsVisibles = [];  // candidatos pintados en el modal (para 👁 y ✎)
+
+function bkVerDocCand(ci) {
+  const c = bkCandsVisibles[ci];
+  if (!c || (c.clave || '').indexOf('PROV:') !== 0) return;
+  const ruta = c.clave.slice(5);
+  const anio = ruta.split('/')[0];
+  window.open(BRIDGE_URL_C + '/proveedores/abrir?anio=' + anio + '&ruta=' + encodeURIComponent(ruta.slice(anio.length + 1)));
+}
+
+async function bkCorregirCand(ci) {
+  const c = bkCandsVisibles[ci];
+  if (!c || (c.clave || '').indexOf('PROV:') !== 0) return;
+  const v = prompt('Importe TOTAL correcto (con IVA) de:\n' + c.numero + ' · ' + (c.cliente || '') + '\n\n(mira el 👁 documento si dudas)', String(c.importe));
+  if (v === null) return;
+  const imp = parseFloat(String(v).replace(/\./g, '').replace(',', '.')) || parseFloat(String(v).replace(',', '.'));
+  if (!(imp > 0)) { alert('Importe no válido.'); return; }
+  try {
+    const ruta = c.clave.slice(5);
+    await fetch(BRIDGE_URL_C + '/proveedores/corregir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ ruta: ruta, total: imp })
+    });
+    await pvCargarDatos(ruta.split('/')[0]);  // recargar los datos de proveedor del año del documento
+    if (bkSeleccion[c.clave]) delete bkSeleccion[c.clave];
+    bkModalRender();
+  } catch(e) { alert('✗ ' + e.message); }
+}
 
 function bkModalRender() {
   const q = (document.getElementById('bk-modal-buscar').value || '').toLowerCase();
@@ -2716,11 +2760,19 @@ function bkModalRender() {
       '🧩 Mostrando solo la propuesta (' + cands.length + ' facturas) · ' +
       '<a onclick="bkSoloSeleccion=false;bkModalRender()" style="cursor:pointer;text-decoration:underline;font-weight:700">ver todas las candidatas</a></div>';
   }
-  document.getElementById('bk-modal-lista').innerHTML = banner + cands.slice(0, 200).map(c => {
+  bkCandsVisibles = cands.slice(0, 200);
+  document.getElementById('bk-modal-lista').innerHTML = banner + bkCandsVisibles.map((c, ci) => {
     const sel = !!bkSeleccion[c.clave];
+    const esProv = (c.clave || '').indexOf('PROV:') === 0;
+    // Facturas de proveedor: ver el PDF original y corregir el total sin salir del modal
+    const herr = esProv
+      ? '<button onclick="event.preventDefault();event.stopPropagation();bkVerDocCand(' + ci + ')" title="Ver el documento original" style="padding:3px 8px;background:#1a2e6e;color:#fff;border:none;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer">👁</button>' +
+        '<button onclick="event.preventDefault();event.stopPropagation();bkCorregirCand(' + ci + ')" title="Corregir el importe total (si el lector lo interpretó mal)" style="padding:3px 8px;background:#e87e1a;color:#fff;border:none;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer">✎</button>'
+      : '';
     return '<label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid #f3f3f3;cursor:pointer;background:' + (sel ? '#eef4ff' : '#fff') + '">' +
       '<input type="checkbox" ' + (sel ? 'checked' : '') + ' onchange="bkToggle(\'' + c.clave + '\')" style="width:auto"/>' +
       '<span style="flex:1;font-size:12.5px"><b>' + c.clave + '</b> · ' + c.fecha + '<br><span style="color:#888">' + c.cliente + '</span></span>' +
+      herr +
       '<span style="font-weight:800;font-size:12.5px">' + bkFmt(c.importe) + '</span></label>';
   }).join('');
   bkSuma();
@@ -3090,7 +3142,9 @@ async function bkRemesas() {
         '<summary style="cursor:pointer;display:flex;gap:10px;align-items:center;font-size:12.5px;flex-wrap:wrap">' +
         '<b>' + (m.fecha || '—') + '</b><span style="color:var(--texto-suave)">' + (m.banco || '') + '</span>' +
         '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (m.concepto || '') + '">' + (m.concepto || '') + '</span>' +
-        '<b>' + bkFmt(m.importe) + '</b>' + estado + ' <span style="color:var(--texto-suave)">(' + (facts.length || 0) + ' fra.)</span>' + gastosTxt + '</summary>' +
+        '<b>' + bkFmt(m.importe) + '</b>' + estado + ' <span style="color:var(--texto-suave)">(' + (facts.length || 0) + ' fra.)</span>' + gastosTxt +
+        ((facts.find(f => f.doc)) ? ' <a onclick="event.preventDefault();window.open(BRIDGE_URL_C + \'/remesas/doc?ruta=\' + encodeURIComponent(\'' + (facts.find(f => f.doc) || {}).doc + '\'))" style="cursor:pointer;font-size:11px;color:#1a2e6e;text-decoration:underline;font-weight:700">👁 documento</a>' : '') +
+        '</summary>' +
         detalle + '</details>';
     }).join('');
   }
@@ -3163,11 +3217,71 @@ async function remesasImportarPDF(files) {
       const r = await fetch(BRIDGE_URL_C + '/remesas/parse_pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-        body: JSON.stringify({ pdf_base64: await blobABase64C(file) })
+        body: JSON.stringify({ pdf_base64: await blobABase64C(file), nombre: file.name })
       });
       d = await r.json();
     } catch(e) { resumen.push('✗ ' + file.name + ': ' + e.message); continue; }
     if (!d.ok) { resumen.push('✗ ' + file.name + ': ' + d.error); continue; }
+
+    // ── DEVOLUCIÓN de impagado (PDF de Sabadell): casa el cargo y marca la remesa origen ──
+    if (d.tipo === 'devolucion') {
+      const rec = d.recibos[0] || {};
+      const objetivo = d.liquido || d.importe;
+      const cargo = movs.find(mm => mm.importe < 0 &&
+        (Math.abs(Math.abs(mm.importe) - objetivo) < 0.01 || Math.abs(Math.abs(mm.importe) - d.importe) < 0.01) &&
+        (!d.fecha_abono || !mm.fecha || Math.abs(new Date(mm.fecha) - new Date(d.fecha_abono)) <= 5 * 86400000));
+      const refs = rec.facturas || [];
+      const cFac = refs.length ? cands.find(x => refs.some(rf => bkNormClave(x.clave) === bkNormClave(rf))) : null;
+      const entradas = [];
+      if (cFac) entradas.push({ serie: cFac.serie, numero: cFac.numero, importe: d.importe, cliente: rec.deudor, situacion: 'devuelto', doc: d.doc });
+      else entradas.push({ serie: refs.length ? 'REF' : '—', numero: refs.join(' '), importe: d.importe, cliente: rec.deudor, situacion: 'devuelto', doc: d.doc });
+      if (cargo) {
+        const difG = Math.round((Math.abs(cargo.importe) - d.importe) * 100) / 100;
+        if (difG >= 0.01) entradas.push({ serie: 'GASTOS', numero: 'gastos devolución', importe: difG, cliente: rec.deudor, situacion: 'abonado' });
+        try {
+          await fetch(BRIDGE_URL_C + '/banco/conciliar', { method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+            body: JSON.stringify({ id: cargo.id, facturas: entradas }) });
+        } catch(e) { resumen.push('✗ ' + file.name + ': error casando el cargo'); continue; }
+      }
+      // Marcar la factura como DEVUELTA en su remesa de origen (corrige el "abonado" del fichero de presentación)
+      const claveDev = refs.length ? bkNormClave(refs[0]) : null;
+      let origenMarcado = false;
+      if (claveDev) {
+        const origen = movs.find(mm => mm.importe > 0 && (mm.conciliado || []).length &&
+          bkClavesDeConciliado(mm.conciliado).some(([k, f]) => k === claveDev && (f.situacion || 'abonado') !== 'devuelto'));
+        if (origen) {
+          const nuevoConc = [];
+          (origen.conciliado || []).forEach(e => {
+            if ((e.serie || '').toUpperCase() === 'REF') {
+              const refsE = String(e.numero || '').match(/[A-Z]+\s*-?\s*\d+/gi) || [];
+              if (refsE.some(rf => bkNormClave(rf) === claveDev)) {
+                const resto = refsE.filter(rf => bkNormClave(rf) !== claveDev);
+                if (resto.length) nuevoConc.push(Object.assign({}, e, { numero: resto.join(' ') }));
+                nuevoConc.push({ serie: claveDev.split('-')[0], numero: claveDev.split('-')[1],
+                  importe: d.importe, cliente: rec.deudor, situacion: 'devuelto' });
+                return;
+              }
+              nuevoConc.push(e);
+              return;
+            }
+            if (bkNormClave((e.serie || '') + '-' + (e.numero || '')) === claveDev) {
+              nuevoConc.push(Object.assign({}, e, { situacion: 'devuelto' }));
+            } else nuevoConc.push(e);
+          });
+          try {
+            await fetch(BRIDGE_URL_C + '/banco/conciliar', { method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+              body: JSON.stringify({ id: origen.id, facturas: nuevoConc }) });
+            origenMarcado = true;
+          } catch(e) { /* informar abajo */ }
+        }
+      }
+      resumen.push('✓ ' + file.name + ': devolución de ' + (rec.deudor || '¿?') + ' (' + bkFmt(d.importe) + ' + gastos)' +
+        (cargo ? ' — cargo casado' : ' — ⚠ no veo el cargo en el banco (sincroniza)') +
+        (origenMarcado ? ' y remesa origen marcada ↩' : refs.length ? ' · ⚠ remesa origen no localizada' : ''));
+      continue;
+    }
 
     // Localizar el abono: por importe NOMINAL o por LÍQUIDO (Sabadell abona neto de comisiones), fecha cercana (±4 días)
     const mov = movs.find(m => m.importe > 0 &&
@@ -3235,6 +3349,7 @@ async function remesasImportarPDF(files) {
       entradas.push({ serie: '—', numero: '', importe: rec.importe, cliente: rec.deudor, situacion: rec.situacion });
     });
 
+    if (d.doc && entradas.length) entradas[0].doc = d.doc;  // documento bancario archivado, visible después
     // Si el banco abonó el LÍQUIDO, la diferencia son comisiones/impuestos — línea propia para cuadrar al céntimo
     if (abonoLiquido) {
       entradas.push({ serie: 'GASTOS', numero: 'comisiones remesa',
