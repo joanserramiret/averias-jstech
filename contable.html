@@ -2750,9 +2750,14 @@ async function bkCargar() {
   try {
     // Autocategorizar siempre antes de listar (nóminas, impuestos, comisiones... — es local y barato)
     try { await fetch(BRIDGE_URL_C + '/banco/categorizar', { method: 'POST', headers: { 'ngrok-skip-browser-warning': 'true' } }); } catch(e) {}
+    // El cuadre y los "por explicar" siguen el período de la barra (lo arrastrado de años
+    // anteriores — importado solo para desglosar sus remesas — no distorsiona el año en curso)
+    const perD0 = (document.getElementById('c-desde') || {}).value || '';
+    const perH0 = (document.getElementById('c-hasta') || {}).value || '';
+    const rangoQ = (perD0 ? '&desde=' + perD0 : '') + (perH0 ? '&hasta=' + perH0 : '');
     const [rMov, rRes] = await Promise.all([
       fetch(BRIDGE_URL_C + '/banco/movimientos?estado=' + estado + (categoria ? '&categoria=' + categoria : ''), { headers: { 'ngrok-skip-browser-warning': 'true' } }),
-      fetch(BRIDGE_URL_C + '/banco/resumen', { headers: { 'ngrok-skip-browser-warning': 'true' } })
+      fetch(BRIDGE_URL_C + '/banco/resumen?x=1' + rangoQ, { headers: { 'ngrok-skip-browser-warning': 'true' } })
     ]);
     const bkTodos = (await rMov.json()).movimientos || [];
     // Facturas ya usadas en CUALQUIER conciliación (claves normalizadas, grupos REF expandidos)
