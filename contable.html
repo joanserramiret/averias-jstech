@@ -4376,7 +4376,8 @@ function pvRender() {
     lista = lista.filter(a => {
       // Buscador a fondo: archivo, proveedor, fecha e IMPORTE (con punto o coma)...
       const dat = pvDatos[anio + '/' + a.rel] || {};
-      const blob = ((a.rel || '') + ' ' + (a.proveedor || '') + ' ' + (dat.fecha || '') + ' ' +
+      const blob = ((a.rel || '') + ' ' + (a.proveedor || '') + ' ' + (dat.emisor || '') + ' ' +
+        (dat.proveedor || '') + ' ' + (dat.fecha || '') + ' ' +
         (dat.total != null ? dat.total.toFixed(2) + ' ' + dat.total.toFixed(2).replace('.', ',') : '')).toLowerCase();
       if (blob.includes(q)) return true;
       // ...y DENTRO del documento (texto del PDF u OCR, desgranado por el bridge)
@@ -4420,8 +4421,10 @@ function pvRender() {
           : est ? '<span style="color:#c96a10;font-size:11px">¿?</span>' : '';
       return '<tr style="border-bottom:1px solid #f3f3f3">' +
         '<td style="padding:5px;text-align:center"><input type="checkbox" class="pv-chk" data-ruta="' + ruta.replace(/"/g, '&quot;') + '" onchange="pvSelChange()" style="width:auto;cursor:pointer"' + (pvSel.has(ruta) ? ' checked' : '') + '/></td>' +
-        '<td style="padding:5px;white-space:nowrap;color:#1a2e6e;font-weight:700">' + (a.proveedor || '—') + '</td>' +
-        '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + a.nombre + '</td>' +
+        '<td style="padding:5px;white-space:nowrap;max-width:230px;overflow:hidden;text-overflow:ellipsis;color:#1a2e6e;font-weight:700" title="' + ((dat.emisor || '') + (a.proveedor ? ' · carpeta: ' + a.proveedor : '')).replace(/"/g, '&quot;') + '">' +
+          (dat.emisor || dat.proveedor || a.proveedor || '—') +
+          (dat.emisor && a.proveedor && dat.emisor.toLowerCase().indexOf(a.proveedor.toLowerCase().slice(0, 6)) === -1 ? ' <span style="color:#888;font-weight:400;font-size:10.5px">(' + a.proveedor + ')</span>' : '') + '</td>' +
+        '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#888" title="' + a.nombre.replace(/"/g, '&quot;') + '">' + a.nombre + '</td>' +
         '<td style="white-space:nowrap;color:#888">' + (dat.fecha || (a.modificado || '').slice(0, 10)) + '</td>' +
         '<td style="white-space:nowrap;text-align:right" onclick="pvCorregir(\'' + ruta.replace(/'/g, "\\'") + '\')" title="Clic para corregir el importe">' + (chip || '<span style="color:#bbb;font-size:11px">sin escanear</span>') + '</td>' +
         '<td style="white-space:nowrap;color:#888;text-align:right">' + kb + '</td>' +
