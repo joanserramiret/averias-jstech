@@ -83,6 +83,8 @@
   <div class="paso"><b class="n">3</b><div>La remesa queda <span class="ok">✓ desglosada</span> con cada cliente y factura; los recibos <span class="rojo">↩ DEVUELTOS</span> salen en rojo (lista de reclamación).</div></div>
   <p>Sin fichero del banco hay dos salidas: <span class="btn">🧮 Proponer cuadre</span> (reconstrucción a partir de las facturas cobradas por Recibo Bancario en una ventana de 25→45→90 días antes del abono — queda marcada <span class="ambar">🧮 propuesta</span>, revísala antes de aceptar) o <span class="btn">✓ Cerrar sin desglose</span>. Todo tiene <span class="btn">✕ Deshacer</span>: nada es irreversible.</p>
   <p>Las <b>devoluciones</b> se separan solas: <span class="rojo">↩ recibos devueltos por clientes</span> (a reclamar) y <span class="ambar">↪ recibos nuestros devueltos a proveedores</span> (ya pagados por transferencia). Los gastos de devolución que cobra el banco aparecen ligados a su remesa.</p>
+  <p><b>Formatos que lee el 📎</b> (5): listado de adeudos de Bankinter (PDF), TXT de Bankinter Empresas, fichero SEPA del Sabadell (TXT), PDF del abono de remesa del Sabadell y <b>PDF de impagado del Sabadell</b> (marca la devolución en su remesa y casa el cargo con gastos). Todo documento importado queda <b>archivado</b> y visible con el enlace <span class="btn">👁 documento</span> de la remesa.</p>
+  <p>Recibos sin localizar: <span class="btn">🪄 Deducir facturas</span> (por cliente e importes) o <span class="btn">✎ Asignar</span> a mano desde el listado completo — <b>tu asignación manual prevalece</b> sobre cualquier suposición, y si el importe no cuadra, la diferencia se anota como gastos repercutidos. El ⚡ también casa solo las devoluciones ("DEVOLUCION RECIBO") y los recobros por transferencia con gastos.</p>
 </div>
 
 <h2>📥 Facturas recibidas: trucos</h2>
@@ -94,6 +96,9 @@
   <tr><td>Corregir un importe mal leído</td><td>Clic sobre el importe de la fila → escribir el valor</td></tr>
   <tr><td>Cambiar el tipo de un documento</td><td>Botón 🧾/📋/🔔/📦 de la fila → selector visual (factura, albarán, aviso, otro o uno nuevo). La elección manda para siempre</td></tr>
   <tr><td>Cambiar el tipo de varios a la vez</td><td>Casillas a la izquierda (o la de la cabecera = todo lo visible) → barra azul arriba → 🧾 Factura / 📋 Albarán…</td></tr>
+  <tr><td>Buscar entre todas las facturas</td><td>El buscador encuentra por proveedor, archivo, fecha e <b>importe</b> (vale "463,26" o "463.26")</td></tr>
+  <tr><td>Me rectificaron una factura (mismo nº)</td><td>Botón 🔄 de la fila → eliges el PDF nuevo → el original va a PARA BORRAR y la rectificada ocupa su lugar, releída</td></tr>
+  <tr><td>Pagar una factura en varios plazos</td><td>Al conciliar un pago menor que la factura, ofrece imputarlo como <b>pago a cuenta</b> 💳; en los siguientes pagos la factura aparece "quedan X €" hasta completarse</td></tr>
   <tr><td>Quitar un PDF que se ha colado</td><td>Botón 🗑 → va a la carpeta PARA BORRAR del Dropbox (y puede aprender el patrón para apartar los futuros solos)</td></tr>
   <tr><td>Documentos colados en el año equivocado</td><td><span class="btn">📅 Cuadrar por año</span> → mueve a su carpeta de año los que tengan fecha de otro ejercicio</td></tr>
   <tr><td>Facturas de Movistar (llegan en HTML)</td><td>El barrido del correo las convierte a PDF solo y las deja en el cajón como las demás</td></tr>
@@ -107,6 +112,8 @@
   <b>"Failed to fetch" o error de conexión</b> → el ordenador de la oficina está reiniciando el servicio. Espera 10-15 segundos y reintenta.<br><br>
   <b>No veo un botón nuevo</b> → recarga forzada con <code>Ctrl+Shift+R</code>, o añade <code>?v=2</code> al final de la dirección.<br><br>
   <b>Saldos bancarios con ⏱</b> → el banco limita las consultas diarias; se muestra el último saldo bueno con su fecha. Se actualiza solo.<br><br>
+  <b>Un movimiento duplicado (entró por extracto y por el banco)</b> → Tesorería → <b>🧹 Duplicados</b>: conserva el trabajado, borra el sobrante y lo veta para que no vuelva a entrar al sincronizar.<br><br>
+  <b>¿Dónde está cobrada esta factura?</b> → clic en el badge <b>Pagada 🔍</b> de la fila: muestra el cobro o remesa donde está imputada, con opción de quitarla o moverla.<br><br>
   <b>Cualquier otra cosa</b> → Joan. Las copias de seguridad se hacen solas cada día en Dropbox (BACKUP BRIDGE), así que nada se pierde.
 </div>
 

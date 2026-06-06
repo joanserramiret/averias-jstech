@@ -4096,7 +4096,13 @@ function pvRender() {
   const anio = document.getElementById('pv-anio').value || new Date().getFullYear();
   const filtro = document.getElementById('pv-filtro').value;
   let lista = pvArchivos;
-  if (q) lista = lista.filter(a => (a.rel || '').toLowerCase().includes(q));
+  if (q) lista = lista.filter(a => {
+    // Buscador a fondo: archivo, proveedor, fecha e IMPORTE (con punto o coma)
+    const dat = pvDatos[anio + '/' + a.rel] || {};
+    const blob = ((a.rel || '') + ' ' + (a.proveedor || '') + ' ' + (dat.fecha || '') + ' ' +
+      (dat.total != null ? dat.total.toFixed(2) + ' ' + dat.total.toFixed(2).replace('.', ',') : '')).toLowerCase();
+    return blob.includes(q);
+  });
   if (filtro) {
     lista = lista.filter(a => {
       const est = (pvDatos[anio + '/' + a.rel] || {}).estado;
@@ -4140,6 +4146,7 @@ function pvRender() {
         '<td style="text-align:right;white-space:nowrap">' +
           '<button onclick="pvCambiarTipo(\'' + ruta.replace(/'/g, "\\'") + '\',\'' + (dat.tipo || 'factura') + '\')" title="Corregir el tipo (factura/albarán/aviso/otro) — tu corrección manda sobre el clasificador" style="padding:3px 8px;background:#fff3e0;border:1px solid #e8b27a;border-radius:6px;font-size:11px;cursor:pointer;margin-right:4px">' + (dat.tipo === 'albaran' ? '📋' : dat.tipo === 'aviso' ? '🔔' : dat.tipo === 'otro' ? '📦' : (!dat.tipo || dat.tipo === 'factura') ? '🧾' : '🏷') + (dat.tipo_manual ? '✓' : '') + '</button>' +
           '<a href="' + url + '" target="_blank" style="padding:3px 10px;background:#1a2e6e;color:#fff;border-radius:6px;font-size:11px;font-weight:700;text-decoration:none">👁 Ver</a>' +
+          '<button onclick="pvSustituir(\'' + ruta.replace(/'/g, "\\'") + '\')" title="Sustituir por la versión rectificada: el original va a PARA BORRAR y la nueva ocupa su lugar" style="padding:3px 8px;background:#fff3e0;border:1px solid #e8b27a;color:#b45309;border-radius:6px;font-size:11px;cursor:pointer;margin-left:4px">🔄</button>' +
           '<button onclick="pvBorrar(\'' + ruta.replace(/'/g, "\\'") + '\',\'' + a.nombre.replace(/'/g, "\\'") + '\')" title="Mover a PARA BORRAR (se cuela y no debería estar)" style="padding:3px 8px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;cursor:pointer;margin-left:4px">🗑</button></td></tr>';
     }).join('');
     return '<div style="font-weight:800;font-size:13px;color:#1a2e6e;margin:12px 0 4px">' + mes + ' <span style="font-weight:400;color:#888">(' + porMes[mes].length + ')</span></div>' +
@@ -4202,6 +4209,44 @@ async function pvCuadrarAnio() {
     alert('✓ ' + (r3.movidos || 0) + ' documento(s) reubicados en su año' + (r3.errores ? ' · ' + r3.errores + ' con error' : '') + '.');
     await pvCargarDatos(anio);
     pvRender();
+  } catch(e) { alert('✗ ' + e.message); }
+}
+
+// 🔄 Sustituir un documento por su versión RECTIFICADA (mismo nº de factura, contenido nuevo)
+let pvSustituyendo = null;
+function pvSustituir(ruta) {
+  pvSustituyendo = ruta;
+  let inp = document.getElementById('pv-sustituir-file');
+  if (!inp) {
+    inp = document.createElement('input');
+    inp.type = 'file';
+    inp.id = 'pv-sustituir-file';
+    inp.accept = '.pdf,.xls,.xlsx,.jpg,.jpeg,.png';
+    inp.style.display = 'none';
+    inp.onchange = () => pvSustituirArchivo(inp.files);
+    document.body.appendChild(inp);
+  }
+  inp.value = '';
+  inp.click();
+}
+
+async function pvSustituirArchivo(files) {
+  if (!files || !files.length || !pvSustituyendo) return;
+  const f = files[0];
+  const ruta = pvSustituyendo;
+  pvSustituyendo = null;
+  if (!confirm('🔄 Sustituir el documento por "' + f.name + '"?\n\nEl original va a PARA BORRAR del Dropbox y la versión rectificada ocupa su lugar, re-escaneada con importe y fecha nuevos.')) return;
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/proveedores/sustituir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ ruta: ruta, nombre: f.name, archivo_base64: await blobABase64C(f) })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      alert('🔄 Sustituida.' + (d.total ? ' Nuevo total leído: ' + bkFmt(d.total) + (d.fecha ? ' · ' + d.fecha : '') : ' (revisa el importe con 🔍 si es imagen/Excel)'));
+      pvCargar();
+    } else alert('✗ ' + (d.error || 'Error'));
   } catch(e) { alert('✗ ' + e.message); }
 }
 
