@@ -3529,11 +3529,13 @@ async function bkRemesas() {
               '<button onclick="remesaQuitarRecibo(' + m.id + ',' + fi + ')" title="Quitar SOLO este recibo del desglose (la factura queda libre; el resto del desglose no se toca)" style="padding:1px 7px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:5px;font-size:10.5px;cursor:pointer">✕</button></td></tr>';
           }).join('') + '</table>' +
           '<div style="text-align:right;margin-top:6px">' +
+          '<button onclick="remesaAsignarManual(' + m.id + ',-1)" title="Añadir factura(s) del listado a este desglose (una o varias a la vez, contra lo que quede sin explicar)" style="padding:4px 10px;background:#1a7a3f;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px">➕ Añadir facturas</button>' +
           (facts.some(x => x.serie === '—') ? '<button onclick="remesaDeducir(' + m.id + ')" title="Deducir las facturas de los recibos sin localizar, por cliente e importes" style="padding:4px 10px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px">🪄 Deducir facturas</button>' : '') +
           (esPropuesta ? '<button onclick="remesaEditarCuadre(' + m.id + ')" title="Editar el cuadre manual: añadir o quitar facturas" style="padding:4px 10px;background:#fff3e0;border:1px solid #e8b27a;color:#b45309;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px">✏ Editar cuadre</button>' : '') +
           '<button onclick="remesaDeshacer(' + m.id + ')" title="Deshacer este desglose: el movimiento vuelve a pendientes y las facturas quedan libres" style="padding:4px 10px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;cursor:pointer">✕ Deshacer desglose</button></div>'
         : '<div style="font-size:12px;color:var(--texto-suave);margin-top:6px">Sin desglosar — súbeme el documento del banco con 📎 (PDF/TXT de Bankinter o Sabadell, o una foto/imagen del justificante: la leo con OCR). ' +
           '<button onclick="remesaProponerCuadre(' + m.id + ')" style="margin-left:8px;padding:4px 10px;background:#fff3e0;border:1.5px solid #e8b27a;color:#b45309;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🧮 Proponer cuadre</button>' +
+          '<button onclick="remesaAsignarManual(' + m.id + ',-1)" title="Añadir factura(s) a mano del listado, empezando el desglose" style="margin-left:6px;padding:4px 10px;background:#1a7a3f;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">➕ Añadir facturas</button>' +
           '<button onclick="remesaCerrarSinDesglose(' + m.id + ',' + m.importe + ')" style="margin-left:6px;padding:4px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:6px;font-size:11px;cursor:pointer">✓ Cerrar sin desglose</button>' +
           ' <span style="font-size:11px">(🧮 = facturas cobradas por Recibo Bancario en Ágora, fechas cercanas y suma exacta — tú confirmas viendo los nombres)</span></div>';
       return '<details style="border:1px solid #e4e8f3;border-radius:8px;padding:8px 12px;margin-bottom:6px">' +
@@ -3998,9 +4000,16 @@ async function remesaQuitarRecibo(movId, fi) {
 // factura(s) de un recibo "sin factura localizada" — el ponteo manda sobre todo lo demás
 let remAsig = null;
 async function remesaAsignarManual(movId, fi) {
+  // fi >= 0: asignar factura(s) a UN recibo concreto ('sin factura localizada')
+  // fi = -1: ➕ AÑADIR facturas sueltas al desglose de la remesa (contra el resto sin explicar)
   const m = (bkRemesasDatos.remesas || []).find(x => x.id === movId);
-  if (!m || !m.conciliado || !m.conciliado[fi]) return;
-  const entrada = m.conciliado[fi];
+  if (!m) return;
+  const anadir = fi < 0;
+  if (!anadir && (!m.conciliado || !m.conciliado[fi])) return;
+  const entrada = anadir
+    ? { importe: Math.round((m.importe - (m.conciliado || []).reduce((s, x) => s + (x.importe || 0), 0)) * 100) / 100,
+        cliente: '', situacion: 'abonado' }
+    : m.conciliado[fi];
   // Mapa de imputaciones existentes (clave → dónde está) — NO excluimos nada del pool:
   // LA VERDAD MANUAL PREVALECE sobre cualquier suposición previa de la app
   const imputadas = {};
@@ -4016,7 +4025,7 @@ async function remesaAsignarManual(movId, fi) {
   const pool = bkCandidatos({ importe: 1 }).filter(c =>
     !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || '') && !enEsta.has(bkNormClave(c.clave)));
   if (!pool.length) { alert('No hay facturas disponibles — ¿has cargado el período en Facturas emitidas?'); return; }
-  remAsig = { movId: movId, fi: fi, objetivo: entrada.importe || 0, cliente: entrada.cliente || '',
+  remAsig = { movId: movId, fi: fi, anadir: anadir, objetivo: entrada.importe || 0, cliente: entrada.cliente || '',
               situacion: entrada.situacion || 'abonado', pool: pool, sel: {}, imputadas: imputadas };
   const viejo = document.getElementById('rasig-modal');
   if (viejo) viejo.remove();
@@ -4024,7 +4033,9 @@ async function remesaAsignarManual(movId, fi) {
   div.id = 'rasig-modal';
   div.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(15,31,92,.55);display:flex;align-items:center;justify-content:center';
   div.innerHTML = '<div style="background:#fff;border-radius:14px;padding:20px;width:620px;max-width:95vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(0,0,0,.3)">' +
-    '<div style="font-weight:800;font-size:15px;color:#1a2e6e">✎ Asignar factura(s) al recibo de ' + (remAsig.cliente || '¿?') + ' · ' + bkFmt(remAsig.objetivo) + '</div>' +
+    '<div style="font-weight:800;font-size:15px;color:#1a2e6e">' +
+    (anadir ? '➕ Añadir facturas a la remesa de ' + bkFmt(m.importe) + (Math.abs(remAsig.objetivo) >= 0.01 ? ' (quedan ' + bkFmt(remAsig.objetivo) + ' sin explicar)' : ' (ya cuadrada — lo que añadas la sobre-explicará)')
+            : '✎ Asignar factura(s) al recibo de ' + (remAsig.cliente || '¿?') + ' · ' + bkFmt(remAsig.objetivo)) + '</div>' +
     '<div id="rasig-suma" style="font-size:13px;font-weight:700;padding:8px 12px;border-radius:8px;margin:8px 0"></div>' +
     '<input id="rasig-buscar" placeholder="🔍 Buscar por número (F-7890) o cliente..." oninput="remAsigRender()" style="padding:8px 10px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-bottom:8px;font-family:inherit"/>' +
     '<div id="rasig-lista" style="flex:1;overflow:auto;border:1px solid #eee;border-radius:8px"></div>' +
@@ -4053,7 +4064,9 @@ function remAsigRender() {
   el.style.background = cuadra ? '#e8f7ef' : '#fff4e0';
   el.style.color = cuadra ? '#1b7a3d' : '#c96a10';
   el.textContent = Object.keys(remAsig.sel).length + ' seleccionada(s) · suman ' + bkFmt(suma) +
-    (cuadra ? ' — ✓ CUADRA con el recibo' : ' — diferencia ' + bkFmt(dif));
+    (remAsig.anadir
+      ? (cuadra ? ' — ✓ CUADRA con lo pendiente de la remesa' : ' — quedarán ' + bkFmt(dif) + ' sin explicar')
+      : (cuadra ? ' — ✓ CUADRA con el recibo' : ' — diferencia ' + bkFmt(dif)));
   let lista = remAsig.pool;
   if (q) lista = lista.filter(c => c.clave.toLowerCase().includes(q) || (c.cliente || '').toLowerCase().includes(q));
   document.getElementById('rasig-lista').innerHTML = lista.slice(0, 200).map(c => {
@@ -4074,7 +4087,11 @@ async function remAsigGuardar() {
   const suma = seles.reduce((s, c) => s + c.importe, 0);
   const dif = Math.round((remAsig.objetivo - suma) * 100) / 100;
   let lineaGastos = null;
-  if (Math.abs(dif) >= 0.01) {
+  if (remAsig.anadir) {
+    // ➕ modo añadir: se puede añadir de poco en poco — solo avisa si la remesa quedaría sobre-explicada
+    if (dif <= -0.01 && !confirm('Ojo: con esto la remesa quedará SOBRE-explicada en ' + bkFmt(-dif) +
+        '.\n¿Añadir igualmente? (tu verdad manda — luego puedes ajustar el desglose con ✕)')) return;
+  } else if (Math.abs(dif) >= 0.01) {
     // El recibo no cuadra con la(s) factura(s): se pide el MOTIVO del descuadre
     // (típico recobro de recibo devuelto: factura + gastos de devolución del banco)
     const res = await bkPedirDescuadre(dif, remAsig.cliente, {});
@@ -4126,12 +4143,13 @@ async function remAsigGuardar() {
       }
     } catch(e) { alert('✗ Error liberando las facturas: ' + e.message); return; }
   }
-  const nuevo = m.conciliado.slice();
+  const nuevo = (m.conciliado || []).slice();
   const reemplazo = seles.map(c => ({ serie: c.serie, numero: c.numero,
     importe: c.importe,
-    cliente: remAsig.cliente + ' ✎', situacion: remAsig.situacion }));
+    cliente: (remAsig.anadir ? (c.cliente || '') : remAsig.cliente) + ' ✎', situacion: remAsig.situacion }));
   if (lineaGastos) reemplazo.push(lineaGastos);
-  nuevo.splice(remAsig.fi, 1, ...reemplazo);
+  if (remAsig.anadir) nuevo.push(...reemplazo);
+  else nuevo.splice(remAsig.fi, 1, ...reemplazo);
   try {
     const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
       method: 'POST',
