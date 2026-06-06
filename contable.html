@@ -604,7 +604,10 @@
           <div id="cobros-desglose"><div style="color:var(--texto-suave);font-size:13px">Carga los datos primero.</div></div>
         </div>
         <div class="card">
-          <div class="card-title">Facturas pendientes de cobro</div>
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+            <span>Facturas pendientes de cobro</span>
+            <button onclick="auditarCartera()" title="Para cada factura pendiente, busca la pista de dónde puede estar su cobro: remesa sin importar, abono sin conciliar, anulación..." style="padding:5px 12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🩺 Auditar cartera</button>
+          </div>
           <div id="cobros-pendientes"><div style="color:var(--texto-suave);font-size:13px">Carga los datos primero.</div></div>
         </div>
       </div>
@@ -2074,6 +2077,72 @@ async function descargarDia(dateStr) {
 }
 
 // ===== COBROS TAB =====
+// 🩺 AUDITORÍA DE CARTERA: el bridge cruza TODAS las facturas con TODOS los movimientos
+// y explica, factura a factura, por qué sale pendiente y dónde puede estar su cobro.
+async function auditarCartera() {
+  const viejo = document.getElementById('audit-modal');
+  if (viejo) viejo.remove();
+  const div = document.createElement('div');
+  div.id = 'audit-modal';
+  div.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(15,31,92,.55);display:flex;align-items:center;justify-content:center';
+  div.innerHTML = '<div style="background:#fff;border-radius:14px;padding:20px;width:860px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column">' +
+    '<div style="font-weight:800;font-size:15px;color:#1a2e6e">🩺 Auditoría de cartera</div>' +
+    '<div id="audit-cuerpo" style="flex:1;overflow:auto;margin-top:10px;font-size:12.5px"><span class="spinner"></span>Cruzando facturas y banco...</div>' +
+    '<div style="text-align:right;margin-top:10px"><button onclick="document.getElementById(\'audit-modal\').remove()" style="padding:8px 16px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;font-size:13px;cursor:pointer">Cerrar</button></div></div>';
+  div.onclick = e => { if (e.target === div) div.remove(); };
+  document.body.appendChild(div);
+  let d;
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/auditoria_cartera?anio=' + new Date().getFullYear(),
+      { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    d = await r.json();
+  } catch(e) {
+    document.getElementById('audit-cuerpo').innerHTML = '<span style="color:#c0392b">✗ ' + e.message + '</span>';
+    return;
+  }
+  const ETIQ = {
+    recibo_sin_remesa: ['🧾 Cobradas por Recibo pero SIN remesa desglosada que las contenga', '#c96a10',
+      'O la remesa aún no se ha pasado (normal en las recientes), o falta importar el extracto/listado de la remesa que las cobró — ojo con remesas de finales del año anterior.'],
+    abono_sin_conciliar: ['💡 Hay un abono SIN CONCILIAR de su mismo importe', '#0e7490', 'Concíliala con el botón 🔗 de la factura.'],
+    abono_categorizado: ['🏷 Hay un abono del mismo importe CATEGORIZADO', '#7c3aed', 'Quizá debía conciliarse con la factura, no categorizarse.'],
+    remesa_cerrada: ['🧩 Puede estar en una remesa CERRADA SIN DESGLOSE', '#b45309', 'Desglósala con 📎 (fichero del banco) o 🧮 y saldrán de pendientes.'],
+    devuelta: ['↩ Recibo devuelto — pendiente de recobro', '#c0392b', 'Correcto que estén pendientes: a reclamar.'],
+    anulada: ['⚖ Anulación interna (tiene devolución hermana)', '#888', 'El panel ya las excluye de la cartera — listadas aquí solo para verificar.'],
+    sin_pista: ['❓ Sin pista en el banco', '#555', 'Cobro aún no producido, o anterior al inicio del extracto importado.']
+  };
+  const grupos = {};
+  (d.pendientes || []).forEach(p => { (grupos[p.pista] = grupos[p.pista] || []).push(p); });
+  const remesaVieja = (d.remesas_banco && d.remesas_banco.length) ? d.remesas_banco[0] : null;
+  let html = '<div style="background:#f7f9fd;border:1px solid var(--borde);border-radius:10px;padding:10px 14px;margin-bottom:10px">' +
+    '<b>' + d.total_pendientes + ' facturas pendientes · ' + bkFmt(d.importe_pendiente) + '</b><br>' +
+    'Remesas en el extracto: <b>' + (d.remesas_banco || []).length + '</b> (' +
+    (d.remesas_banco || []).filter(r => r.estado.indexOf('desglosada') === 0).length + ' desglosadas)' +
+    (remesaVieja ? ' · la más antigua: <b>' + remesaVieja.fecha + '</b>' : '') +
+    (remesaVieja ? '<br><span style="color:#c96a10">⚠ Facturas cobradas por remesas ANTERIORES a ' + remesaVieja.fecha +
+      ' (p. ej. la remesa del 31/12 del año pasado) saldrán pendientes hasta que importes el extracto N43 de ese período en Tesorería y su listado con 📎.</span>' : '') +
+    '</div>';
+  for (const pista of ['recibo_sin_remesa', 'abono_sin_conciliar', 'abono_categorizado', 'remesa_cerrada', 'devuelta', 'sin_pista', 'anulada']) {
+    const lista = grupos[pista];
+    if (!lista || !lista.length) continue;
+    const et = ETIQ[pista] || [pista, '#555', ''];
+    html += '<details style="border:1px solid #e4e8f3;border-radius:8px;padding:8px 12px;margin-bottom:6px">' +
+      '<summary style="cursor:pointer;font-weight:700;color:' + et[1] + '">' + et[0] + ' — ' + lista.length + ' fra. · ' +
+      bkFmt(lista.reduce((s, p) => s + p.importe, 0)) + '</summary>' +
+      '<div style="font-size:11.5px;color:var(--texto-suave);margin:6px 0">' + et[2] + '</div>' +
+      '<table style="width:100%;font-size:12px;border-collapse:collapse">' +
+      lista.map(p => '<tr style="border-bottom:1px solid #f3f3f3"><td style="padding:3px;font-weight:700">' + p.clave +
+        '</td><td>' + (p.cliente || '—') + '</td><td style="white-space:nowrap">' + p.fecha +
+        '</td><td style="text-align:right;font-weight:700;white-space:nowrap">' + bkFmt(p.importe) + '</td></tr>' +
+        (p.detalle ? '<tr><td></td><td colspan="3" style="font-size:11px;color:#888;padding-bottom:5px">' + p.detalle + '</td></tr>' : '')
+      ).join('') + '</table></details>';
+  }
+  html += '<details style="border:1px solid #e4e8f3;border-radius:8px;padding:8px 12px"><summary style="cursor:pointer;font-weight:700;color:#1a2e6e">🧩 Censo de remesas del extracto</summary>' +
+    '<table style="width:100%;font-size:12px">' + (d.remesas_banco || []).map(r =>
+      '<tr><td>' + r.fecha + '</td><td>' + r.banco + '</td><td style="text-align:right;font-weight:700">' + bkFmt(r.importe) +
+      '</td><td>' + r.estado + '</td></tr>').join('') + '</table></details>';
+  document.getElementById('audit-cuerpo').innerHTML = html;
+}
+
 function actualizarCobros() {
   const metodos = {};
   const hoy = new Date();
@@ -3381,7 +3450,7 @@ async function bkRemesas() {
             : '<span style="color:#c96a10;font-weight:700">⚠ quedan ' + bkFmt(resto) + ' sin explicar</span>')
         : '<span style="color:#c0392b;font-weight:700">⏳ sin desglosar</span>';
       const detalle = facts.length
-        ? '<table style="width:100%;font-size:12px;margin-top:6px"><tr style="color:var(--texto-suave)"><th style="text-align:left">Factura</th><th style="text-align:left">Cliente</th><th style="text-align:right">Importe</th></tr>' +
+        ? '<table style="width:100%;font-size:12px;margin-top:6px"><tr style="color:var(--texto-suave)"><th style="text-align:left">Factura</th><th style="text-align:left">Cliente</th><th style="text-align:right">Importe</th><th></th></tr>' +
           facts.map((f, fi) => {
             const dev = f.situacion === 'devuelto';
             const fra = f.serie === '—'
@@ -3392,7 +3461,8 @@ async function bkRemesas() {
                       : '<b>' + f.serie + '-' + f.numero + '</b>';
             return '<tr' + (dev ? ' style="color:#c0392b;font-weight:700"' : '') + '><td>' + fra + '</td><td>' +
               (f.cliente || '—') + (dev ? ' ↩ DEVUELTO' : '') +
-              '</td><td style="text-align:right">' + bkFmt(f.importe) + '</td></tr>';
+              '</td><td style="text-align:right">' + bkFmt(f.importe) + '</td>' +
+              '<td style="text-align:right;width:26px"><button onclick="remesaQuitarRecibo(' + m.id + ',' + fi + ')" title="Quitar SOLO este recibo del desglose (la factura queda libre; el resto del desglose no se toca)" style="padding:1px 7px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:5px;font-size:10.5px;cursor:pointer">✕</button></td></tr>';
           }).join('') + '</table>' +
           '<div style="text-align:right;margin-top:6px">' +
           (facts.some(x => x.serie === '—') ? '<button onclick="remesaDeducir(' + m.id + ')" title="Deducir las facturas de los recibos sin localizar, por cliente e importes" style="padding:4px 10px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px">🪄 Deducir facturas</button>' : '') +
@@ -3799,6 +3869,33 @@ async function remCuadreGuardar() {
       bkRemesas();
     } else alert('✗ No se pudo guardar');
   } catch(e) { alert('✗ ' + e.message); }
+}
+
+// ✕ Quita UN solo recibo de un desglose, sin tocar el resto (cirugía, no demolición).
+// La factura queda libre (vuelve a pendiente si no está en otro cobro) y la remesa
+// pasa a "quedan X sin explicar" hasta que reasignes ese importe con ✎ o 🪄.
+async function remesaQuitarRecibo(movId, fi) {
+  const m = (bkRemesasDatos.remesas || []).find(x => x.id === movId);
+  if (!m || !m.conciliado || !m.conciliado[fi]) return;
+  const e = m.conciliado[fi];
+  const nombre = e.serie === 'REF' ? 'grupo ' + e.numero
+               : e.serie === '—' ? 'recibo sin factura'
+               : (e.serie || '') + (e.numero != null ? '-' + e.numero : '');
+  if (!confirm('¿Quitar SOLO este recibo del desglose?\n\n' + nombre + ' · ' + (e.cliente || '') + ' · ' + bkFmt(e.importe || 0) +
+    '\n\nLa factura queda libre (volverá a Pendiente si no está en otro cobro).\nEl resto del desglose NO se toca' +
+    (m.conciliado.length === 1 ? ' (era el único: la remesa volverá a ⏳ sin desglosar)' : '') + '.')) return;
+  const nuevo = m.conciliado.filter((_, i) => i !== fi);
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: movId, facturas: nuevo })
+    });
+    if ((await r.json()).ok) {
+      refrescarEstadosCobro();
+      bkRemesas();
+    } else alert('✗ No se pudo guardar');
+  } catch(err) { alert('✗ ' + err.message); }
 }
 
 // ✎ Asignación MANUAL: cuando tú tienes la certeza y el número, eliges del listado la(s)
