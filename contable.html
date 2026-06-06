@@ -1296,13 +1296,30 @@ async function blobABase64C(blob) {
 }
 
 async function subirCajasFaltantes() {
-  const facts = todasFacturasC.filter(f => f.Status !== 'Cancelled' && f.Date);
+  let facts = todasFacturasC.filter(f => f.Status !== 'Cancelled' && f.Date);
   if (!facts.length) { alert('Primero carga las facturas del período.'); return; }
   const statusEl = document.getElementById('c-status');
 
-  // Rango de fechas cargado
-  const fechas = facts.map(f => f.Date.split('T')[0]).sort();
-  const desde = fechas[0], hasta = fechas[fechas.length - 1];
+  // Rango de fechas cargado (sugerido por defecto)
+  const fechasTodas = facts.map(f => f.Date.split('T')[0]).sort();
+  let desde = fechasTodas[0], hasta = fechasTodas[fechasTodas.length - 1];
+
+  // Elegir qué subir: todo el período, o acotar por fechas
+  const modo = prompt(
+    '📦 Subir a CAJAS — ¿qué quieres subir?\n\n' +
+    '· Deja VACÍO y Aceptar → todo el período cargado (' + desde + ' → ' + hasta + '), solo lo que falte\n' +
+    '· O escribe un rango de fechas:  AAAA-MM-DD  AAAA-MM-DD\n' +
+    '  (ej. "2026-01-01 2026-01-31" para solo enero)', '');
+  if (modo === null) return;  // cancelado
+  const m = modo.trim().match(/(\d{4}-\d{2}-\d{2})\s+(\d{4}-\d{2}-\d{2})/);
+  if (modo.trim() && m) {
+    desde = m[1]; hasta = m[2];
+    facts = facts.filter(f => { const d = f.Date.split('T')[0]; return d >= desde && d <= hasta; });
+    if (!facts.length) { alert('No hay facturas cargadas en ' + desde + ' → ' + hasta + '.\n(¿Has cargado ese período arriba?)'); return; }
+  } else if (modo.trim()) {
+    alert('Formato no válido. Escribe dos fechas: AAAA-MM-DD AAAA-MM-DD, o déjalo vacío para todo.');
+    return;
+  }
 
   setStatusC(statusEl, 'Comprobando qué falta en CAJAS...', 'loading');
   let existentes = {};
