@@ -1590,20 +1590,25 @@ async function conciliarDesdeFactura(idx) {
   const porNombre = pend.filter(m => m.importe > 0 && !porImporte.includes(m) && cliente && bkNombreEnConcepto(cliente, m.concepto));
   const cands = porImporte.concat(porNombre).slice(0, 12);
 
-  // ...y las REMESAS donde podría caber: con hueco "sin factura" de su importe, con resto
-  // sin explicar suficiente, o aún sin desglosar (asignación parcial de la partida)
+  // ...y los movimientos donde podría caber: REMESAS (hueco "sin factura" de su importe, resto
+  // sin explicar, o sin desglosar) y CUALQUIER ABONO ya parcialmente explicado (un ingreso de
+  // cajero "FRAS VARIAS" equivale a varias facturas: se van añadiendo una a una hasta cuadrar)
   const enEstaClave = bkNormClave(num);
-  const remesas = movs.filter(m => m.importe > 0 && /REMESA|REM\.?\s*RECIBOS|ADEUDOS/i.test(m.concepto || ''))
+  const remesas = movs.filter(m => m.importe > 0 &&
+      (/REMESA|REM\.?\s*RECIBOS|ADEUDOS/i.test(m.concepto || '') || (m.conciliado || []).length))
     .map(m => {
+      const esRem = /REMESA|REM\.?\s*RECIBOS|ADEUDOS/i.test(m.concepto || '');
       const facts = m.conciliado || [];
       if (bkClavesDeConciliado(facts).some(([k]) => k === enEstaClave)) return null;  // ya está dentro
       const resto = Math.round((m.importe - facts.reduce((s, x) => s + (x.importe || 0), 0)) * 100) / 100;
       const hueco = facts.findIndex(x => x.serie === '—' && Math.abs((x.importe || 0) - t) < 0.01);
       if (hueco >= 0) return { m, tipo: 'hueco', hueco, texto: 'recibo "sin factura localizada" de ' + bkFmt(t) + ' — encaja exacto' };
+      if (!facts.length && !esRem) return null;  // los abonos sueltos sin tocar ya salen arriba como pendientes
       if (!facts.length && m.importe >= t - 0.01) return { m, tipo: 'vacia', hueco: -1, texto: 'sin desglosar — la factura entrará como desglose parcial' };
-      if (resto >= t - 0.01) return { m, tipo: 'resto', hueco: -1, texto: 'quedan ' + bkFmt(resto) + ' sin explicar' };
-      // No cabe por resto… pero LA VERDAD MANUAL PREVALECE: se ofrece igualmente con aviso
-      // (si fuerzas, la remesa quedará sobre-explicada — revisa el desglose y quita lo que sobre con ✕)
+      if (resto >= t - 0.01) return { m, tipo: 'resto', hueco: -1, texto: (esRem ? 'quedan ' : 'abono parcialmente explicado — quedan ') + bkFmt(resto) + ' sin explicar' };
+      // No cabe por resto… pero LA VERDAD MANUAL PREVALECE: en las REMESAS se ofrece
+      // igualmente con aviso (los abonos normales ya cuadrados no — sería ruido)
+      if (!esRem) return null;
       return { m, tipo: 'nocabe', hueco: -1,
         texto: '⚠ no cabe: ' + (resto > 0 ? 'solo quedan ' + bkFmt(resto) + ' sin explicar' : 'ya está cuadrada') +
                ' — al forzar quedará sobre-explicada (revisa el desglose con ✕)' };
@@ -1630,7 +1635,7 @@ async function conciliarDesdeFactura(idx) {
       '<div style="flex:1"><b>' + m.fecha + '</b> · ' + (m.banco || '') + '<br><span style="color:#666">' + (m.concepto || '').slice(0, 80) + '</span></div>' +
       '<b style="color:' + (Math.abs(m.importe - t) < 0.01 ? '#1a7a3f' : '#c96a10') + '">' + bkFmt(m.importe) + '</b>' +
       '<button onclick="cdfConciliar(' + m.id + ',' + idx + ')" style="padding:6px 12px;background:#1a2e6e;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">Conciliar</button></div>').join('') +
-    (remesas.length ? '<div style="font-size:12px;color:#888;margin:10px 0 8px">…o <b>dentro de una remesa</b> 🧩 (asignación de una parte de la partida):</div>' +
+    (remesas.length ? '<div style="font-size:12px;color:#888;margin:10px 0 8px">…o <b>dentro de una remesa o abono parcialmente explicado</b> 🧩 (se van añadiendo facturas hasta cuadrar):</div>' +
       remesas.map(rm =>
         '<div style="display:flex;gap:10px;align-items:center;border:1px solid ' + (rm.tipo === 'nocabe' ? '#e0b0b0' : '#e8d9b5') + ';background:' + (rm.tipo === 'nocabe' ? '#fdf3f3' : '#fffaf0') + ';border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:12.5px">' +
         '<div style="flex:1"><b>' + rm.m.fecha + '</b> · ' + (rm.m.banco || '') + ' · remesa de <b>' + bkFmt(rm.m.importe) + '</b><br>' +
@@ -1676,11 +1681,14 @@ async function cdfConciliar(movId, idx) {
   const modal = document.getElementById('cdf-modal');
   if (modal) modal.remove();
   try {
+    // Se AÑADE a lo que el movimiento ya tenga conciliado (un ingreso "FRAS VARIAS"
+    // equivale a varias facturas) — nunca se machaca lo anterior
+    const previo = ((cdfMovs[movId] || {}).conciliado) || [];
     const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-      body: JSON.stringify({ id: movId, facturas: [{ serie: f.Serie, numero: f.Number,
-        importe: f.Totals.GrossAmount, cliente: f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '' }] })
+      body: JSON.stringify({ id: movId, facturas: previo.concat([{ serie: f.Serie, numero: f.Number,
+        importe: f.Totals.GrossAmount, cliente: f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '' }]) })
     });
     if ((await r.json()).ok) { await refrescarEstadosCobro(); }
     else alert('✗ No se pudo conciliar');
