@@ -1066,17 +1066,23 @@ function calcularAnuladas() {
   neg.forEach(d => {
     const objetivo = -d.Totals.GrossAmount;
     const cliD = (d.Customer && (d.Customer.Cif || d.Customer.BusinessName || '')) || '';
-    const hermana = pos.find(f => {
+    const fechaD = (d.Date || '').slice(0, 10);
+    const candidatas = pos.filter(f => {
       if (usadas.has(f)) return false;
       if (Math.abs(f.Totals.GrossAmount - objetivo) > 0.005) return false;
       const cliF = (f.Customer && (f.Customer.Cif || f.Customer.BusinessName || '')) || '';
       return !cliD || !cliF || cliD === cliF;  // mismo cliente si ambos lo tienen
     });
-    if (hermana) {
-      usadas.add(hermana);
-      fcAnuladas.add((hermana.Serie + '-' + hermana.Number).toUpperCase());
-      fcAnuladas.add((d.Serie + '-' + d.Number).toUpperCase());
-    }
+    if (!candidatas.length) return;
+    // Prioridad: la F del MISMO DÍA que la FD (el fallo humano se corrige en el momento);
+    // si no la hay, la más cercana en fecha
+    candidatas.sort((a, b) =>
+      Math.abs(new Date((a.Date || '').slice(0, 10)) - new Date(fechaD)) -
+      Math.abs(new Date((b.Date || '').slice(0, 10)) - new Date(fechaD)));
+    const hermana = candidatas[0];
+    usadas.add(hermana);
+    fcAnuladas.add((hermana.Serie + '-' + hermana.Number).toUpperCase());
+    fcAnuladas.add((d.Serie + '-' + d.Number).toUpperCase());
   });
 }
 
@@ -1139,8 +1145,8 @@ function actualizarDashboard() {
     if (mesF === mesActual) totalMes += t;
     if (t > 0 && !anulada) { nAnio++; if (mesF === mesActual) nMes++; }  // ni devoluciones ni anuladas
 
-    // COBROS / PENDIENTES: solo ventas reales vivas; anuladas y devoluciones fuera
-    if (t <= 0 || anulada) return;
+    // COBROS / PENDIENTES: solo ventas reales vivas; anuladas, devoluciones y tickets T/TD/D fuera
+    if (t <= 0 || anulada || /^(T|TD|D)$/i.test(f.Serie || '')) return;
 
     const pagos = f.Payments || [];
     const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
@@ -1212,6 +1218,8 @@ function filtrarFacturasC() {
   const hoy = new Date();
 
   facturasFiltC = todasFacturasC.filter(f => {
+    // Tickets simplificados y sus devoluciones (T/TD/D): conversiones internas, fuera de los listados
+    if (/^(T|TD|D)$/i.test(f.Serie || '')) return false;
     const nombre = (f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '').toLowerCase();
     const cif = (f.Customer ? f.Customer.Cif || '' : '').toLowerCase();
     const num = (f.Serie + '-' + f.Number).toLowerCase();
@@ -1831,6 +1839,7 @@ function actualizarCobros() {
   calcularAnuladas();
   const pendientes = todasFacturasC.filter(f => {
     if (f._tipo !== 'factura') return false;
+    if (/^(T|TD|D)$/i.test(f.Serie || '')) return false;  // tickets simplificados: fuera de la cartera
     const t = f.Totals ? f.Totals.GrossAmount : 0;
     if (t <= 0) return false;  // devoluciones: no se cobran
     if (fcAnuladas.has((f.Serie + '-' + f.Number).toUpperCase())) return false;  // anuladas con su hermana
