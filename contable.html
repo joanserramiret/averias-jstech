@@ -1061,10 +1061,19 @@ async function cargarCobradasBanco() {
     const cobradas = new Set(), devueltas = new Set();
     movs.forEach(m => (m.conciliado || []).forEach(f => {
       const k = (f.serie + '-' + f.numero).toUpperCase();
-      if (f.situacion === 'devuelto') devueltas.add(k); else cobradas.add(k);
+      if (f.situacion === 'devuelto') devueltas.add(k);
+      else if (m.importe > 0) cobradas.add(k);  // cobro válido = en un ABONO y no marcado devuelto
     }));
+    // Ciclo del recibo devuelto: la devolución deja la factura pendiente HASTA que un nuevo
+    // cobro válido (transferencia o nueva remesa) la "mata" → entonces cuenta como cobrada.
     bkCobradasBanco = { cobradas, devueltas };
   } catch(e) { bkCobradasBanco = { cobradas: new Set(), devueltas: new Set(), sinBanco: true }; }
+}
+
+// ¿Es este cargo una devolución de recibo de CLIENTE? (no un pago a proveedor)
+function bkEsDevolCliente(m) {
+  return !!(m && m.importe < 0 && /DEVOL|DEVUELT|IMPAGAD/i.test(m.concepto || '') &&
+    !/TRANSF\w*\.?\s+A\b/i.test(m.concepto || ''));
 }
 
 function actualizarDashboard() {
@@ -1097,13 +1106,12 @@ function actualizarDashboard() {
     const pagos = f.Payments || [];
     const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
     const clave = (f.Serie + '-' + f.Number).toUpperCase();
-    // Cobro inmediato en TPV (efectivo/tarjeta/bizum) = cobrada sin esperar al banco
-    const inmediato = sumPagos >= t - 0.01 && pagos.some(p => /EFECTIVO|TARJETA|CASH|CONTADO|BIZUM/i.test(p.MethodName || ''));
     let esCobrada;
     if (banco) {
-      // La verdad del banco: conciliada = cobrada; recibo devuelto = pendiente aunque Ágora diga otra cosa
-      esCobrada = !banco.devueltas.has(clave) && (inmediato || banco.cobradas.has(clave));
-      if (banco.devueltas.has(clave)) nDevueltas++;
+      // COBRADA = casada con el banco (transferencia o remesa). Un recibo devuelto la deja
+      // pendiente hasta que un NUEVO cobro válido la mata.
+      esCobrada = banco.cobradas.has(clave);
+      if (banco.devueltas.has(clave) && !esCobrada) nDevueltas++;
     } else {
       esCobrada = sumPagos >= t - 0.01 || (f.Status && (f.Status.toLowerCase().includes('paid') || f.Status === 'Closed' || f.Status === 'Processed'));
     }
@@ -1178,8 +1186,7 @@ function filtrarFacturasC() {
     let esPagada;
     if (bancoF) {
       const clave = (f.Serie + '-' + f.Number).toUpperCase();
-      const inmediato = sumPagos >= t - 0.01 && pagos.some(p => /EFECTIVO|TARJETA|CASH|CONTADO|BIZUM/i.test(p.MethodName || ''));
-      esPagada = !bancoF.devueltas.has(clave) && (inmediato || bancoF.cobradas.has(clave));
+      esPagada = bancoF.cobradas.has(clave);  // un cobro válido posterior mata la devolución
     } else {
       esPagada = sumPagos >= t - 0.01 || (f.Status && (f.Status === 'Closed' || f.Status === 'Processed' || f.Status.toLowerCase().includes('paid')));
     }
@@ -1655,32 +1662,59 @@ function actualizarCobros() {
     const pagos = f.Payments || [];
     const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
     if (banco) {
-      // Verdad bancaria: devuelta = pendiente; cobrada = TPV inmediato o conciliada en banco
+      // Verdad bancaria: devuelta = pendiente; cobrada = SOLO conciliada en banco (transfer o remesa)
       const clave = (f.Serie + '-' + f.Number).toUpperCase();
-      if (banco.devueltas.has(clave)) return true;
-      const inmediato = sumPagos >= t - 0.01 && pagos.some(p => /EFECTIVO|TARJETA|CASH|CONTADO|BIZUM/i.test(p.MethodName || ''));
-      return !(inmediato || banco.cobradas.has(clave));
+      return !banco.cobradas.has(clave);  // devuelta sin recobro = pendiente; recobrada = fuera
     }
     if (f.Status && (f.Status === 'Closed' || f.Status === 'Processed' || f.Status.toLowerCase().includes('paid'))) return false;
     return sumPagos < t - 0.01;
   }).sort((a,b) => new Date(a.Date) - new Date(b.Date));
 
-  document.getElementById('cobros-pendientes').innerHTML = pendientes.length
-    ? pendientes.map(f => {
-        const cliente = f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '—') : '—';
-        const total = f.Totals ? f.Totals.GrossAmount.toFixed(2) + '€' : '—';
-        const fecha = f.Date ? f.Date.split('T')[0] : '—';
-        const dias = Math.floor((hoy - new Date(f.Date)) / 86400000);
-        const color = dias > 30 ? 'var(--rojo)' : dias > 15 ? 'var(--naranja)' : 'var(--texto-suave)';
-        return '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--borde);font-size:13px">' +
-          '<div><span style="font-weight:700;color:var(--azul)">' + f.Serie + '-' + f.Number + '</span> ' + cliente + '</div>' +
-          '<div style="display:flex;gap:12px;align-items:center">' +
-            '<span style="font-weight:700">' + total + '</span>' +
-            '<span style="color:' + color + ';font-size:11px">' + dias + 'd</span>' +
-          '</div>' +
-        '</div>';
-      }).join('')
-    : '<div style="color:var(--verde);font-size:13px;font-weight:600">✓ No hay facturas pendientes de cobro.</div>';
+  // SEGUIMIENTO DE COBRO: antigüedad de saldos + agrupado por cliente (los que más deben, arriba)
+  const el = document.getElementById('cobros-pendientes');
+  if (!pendientes.length) {
+    el.innerHTML = '<div style="color:var(--verde);font-size:13px;font-weight:600">✓ No hay facturas pendientes de cobro.</div>';
+    return;
+  }
+  const buckets = { '0-30': [0, 0], '31-60': [0, 0], '61-90': [0, 0], '+90': [0, 0] };
+  const porCliente = {};
+  pendientes.forEach(f => {
+    const t = f.Totals ? f.Totals.GrossAmount : 0;
+    const dias = Math.floor((hoy - new Date(f.Date)) / 86400000);
+    const b = dias <= 30 ? '0-30' : dias <= 60 ? '31-60' : dias <= 90 ? '61-90' : '+90';
+    buckets[b][0]++; buckets[b][1] += t;
+    const cli = f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '(sin nombre)') : '(sin nombre)';
+    const g = porCliente[cli] = porCliente[cli] || { total: 0, maxDias: 0, facts: [] };
+    g.total += t;
+    g.maxDias = Math.max(g.maxDias, dias);
+    const clave = (f.Serie + '-' + f.Number).toUpperCase();
+    g.facts.push({ num: f.Serie + '-' + f.Number, fecha: (f.Date || '').slice(0, 10), total: t, dias: dias,
+                   devuelta: !!(banco && banco.devueltas.has(clave)) });
+  });
+  const colB = { '0-30': '#1a7a3f', '31-60': '#c96a10', '61-90': '#c0392b', '+90': '#7b241c' };
+  let html = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">' +
+    Object.entries(buckets).map(([b, [n, s]]) =>
+      '<div style="flex:1;min-width:110px;background:#f7f9fd;border:1px solid var(--borde);border-radius:10px;padding:8px 12px;text-align:center">' +
+      '<div style="font-size:11px;color:var(--texto-suave)">' + b + ' días</div>' +
+      '<div style="font-weight:800;font-size:15px;color:' + colB[b] + '">' + s.toFixed(2) + '€</div>' +
+      '<div style="font-size:11px;color:var(--texto-suave)">' + n + ' fra.</div></div>').join('') + '</div>';
+
+  html += Object.entries(porCliente).sort((a, b) => b[1].total - a[1].total).map(([cli, g]) => {
+    const colorCli = g.maxDias > 60 ? 'var(--rojo)' : g.maxDias > 30 ? '#c96a10' : 'var(--azul)';
+    return '<details style="border:1px solid var(--borde);border-radius:8px;padding:7px 12px;margin-bottom:6px">' +
+      '<summary style="cursor:pointer;display:flex;gap:10px;align-items:center;font-size:13px">' +
+      '<b style="color:' + colorCli + ';flex:1">' + cli + '</b>' +
+      '<span style="color:var(--texto-suave);font-size:11px">' + g.facts.length + ' fra. · hasta ' + g.maxDias + 'd</span>' +
+      '<b>' + g.total.toFixed(2) + '€</b></summary>' +
+      g.facts.sort((a, b) => b.dias - a.dias).map(x =>
+        '<div style="display:flex;justify-content:space-between;padding:5px 0 5px 12px;border-bottom:1px solid #f3f3f3;font-size:12.5px">' +
+        '<span><b style="color:var(--azul)">' + x.num + '</b> · ' + x.fecha +
+        (x.devuelta ? ' <span style="color:#c0392b;font-weight:700">↩ RECIBO DEVUELTO</span>' : '') + '</span>' +
+        '<span style="display:flex;gap:10px"><b>' + x.total.toFixed(2) + '€</b>' +
+        '<span style="color:' + (x.dias > 30 ? 'var(--rojo)' : 'var(--texto-suave)') + ';font-size:11px">' + x.dias + 'd</span></span></div>').join('') +
+      '</details>';
+  }).join('');
+  el.innerHTML = html;
 }
 
 // ===== IVA TAB =====
@@ -2306,6 +2340,23 @@ function bkAbrirConciliar(id) {
 }
 
 function bkCandidatos(mov) {
+  // Cargo de DEVOLUCIÓN de recibo de cliente → se asocia a la factura de VENTA devuelta
+  // (las marcadas como devueltas en remesas salen primero)
+  if (mov && mov.importe < 0 && bkEsDevolCliente(mov)) {
+    const dev = (bkCobradasBanco && bkCobradasBanco.devueltas) ? bkCobradasBanco.devueltas : new Set();
+    return (typeof todasFacturasC !== 'undefined' ? todasFacturasC : [])
+      .filter(f => f._tipo === 'factura' && f.Totals && f.Totals.GrossAmount > 0)
+      .map(f => ({
+        clave: f.Serie + '-' + f.Number,
+        serie: f.Serie, numero: f.Number,
+        fecha: (f.Date || '').slice(0, 10),
+        importe: f.Totals.GrossAmount,
+        cliente: (f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '') +
+                 (dev.has((f.Serie + '-' + f.Number).toUpperCase()) ? ' ↩ devuelta en remesa' : '')
+      }))
+      .sort((a, b) => (dev.has((b.serie + '-' + b.numero).toUpperCase()) ? 1 : 0) -
+                      (dev.has((a.serie + '-' + a.numero).toUpperCase()) ? 1 : 0));
+  }
   // Cargos (importe negativo) → facturas de PROVEEDOR extraídas del Dropbox
   if (mov && mov.importe < 0) {
     return Object.values(pvDatos)
@@ -2361,9 +2412,12 @@ let bkUsadas = new Set();  // facturas ya conciliadas en algún movimiento
 function bkModalRender() {
   const q = (document.getElementById('bk-modal-buscar').value || '').toLowerCase();
   let cands = bkCandidatos(bkMovActual);
-  // No ofrecer las que ya están conciliadas en otro movimiento (salvo las preseleccionadas de ESTE)
+  // No ofrecer las que ya están conciliadas en otro movimiento (salvo las preseleccionadas de ESTE).
+  // EXCEPCIÓN: en una devolución de recibo, la factura está conciliada en su remesa — debe verse.
   const totalCands = cands.length;
-  cands = cands.filter(c => !bkUsadas.has((c.clave || '').toUpperCase()) || bkSeleccion[c.clave]);
+  if (!bkEsDevolCliente(bkMovActual)) {
+    cands = cands.filter(c => !bkUsadas.has((c.clave || '').toUpperCase()) || bkSeleccion[c.clave]);
+  }
   const ocultadas = totalCands - cands.length;
   if (!cands.length) {
     const msj = (bkMovActual && bkMovActual.importe < 0)
@@ -2488,7 +2542,11 @@ async function bkGuardarConciliacion() {
     const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-      body: JSON.stringify({ id: bkMovActual.id, facturas: seles.map(c => ({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente })) })
+      body: JSON.stringify({ id: bkMovActual.id, facturas: seles.map(c => {
+        const f = { serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente };
+        if (bkEsDevolCliente(bkMovActual)) f.situacion = 'devuelto';  // el cargo de devolución marca la factura como devuelta
+        return f;
+      }) })
     });
     const d = await r.json();
     if (!d.ok) throw new Error('No se pudo guardar');
