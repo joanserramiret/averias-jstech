@@ -1092,16 +1092,19 @@ async function cargarCobradasBanco() {
   try {
     const r = await fetch(BRIDGE_URL_C + '/banco/movimientos?estado=conciliado', { headers: { 'ngrok-skip-browser-warning': 'true' } });
     const movs = (await r.json()).movimientos || [];
-    const cobradas = new Set(), devueltas = new Set();
+    const cobradas = new Set(), devueltas = new Set(), detalle = {};
     movs.forEach(m => (m.conciliado || []).forEach(f => {
       const k = (f.serie + '-' + f.numero).toUpperCase();
+      // Trazabilidad: en qué movimiento(s) está imputada cada factura
+      (detalle[k] = detalle[k] || []).push({ id: m.id, fecha: m.fecha, banco: m.banco,
+        concepto: m.concepto, importe: m.importe, situacion: f.situacion || 'abonado' });
       if (f.situacion === 'devuelto') devueltas.add(k);
       else if (m.importe > 0) cobradas.add(k);  // cobro válido = en un ABONO y no marcado devuelto
     }));
     // Ciclo del recibo devuelto: la devolución deja la factura pendiente HASTA que un nuevo
     // cobro válido (transferencia o nueva remesa) la "mata" → entonces cuenta como cobrada.
-    bkCobradasBanco = { cobradas, devueltas };
-  } catch(e) { bkCobradasBanco = { cobradas: new Set(), devueltas: new Set(), sinBanco: true }; }
+    bkCobradasBanco = { cobradas, devueltas, detalle };
+  } catch(e) { bkCobradasBanco = { cobradas: new Set(), devueltas: new Set(), detalle: {}, sinBanco: true }; }
 }
 
 // Tras conciliar/desconciliar: recarga la verdad bancaria y repinta todas las vistas afectadas,
@@ -1250,6 +1253,64 @@ function filtrarFacturasC() {
   });
 
   renderTablaFacturas();
+}
+
+// 🔍 Ficha de imputación: en qué cobro(s)/remesa(s) está conciliada una factura,
+// con opción de quitarla de uno o reimputarla a otro
+function verImputacion(idx) {
+  const f = facturasFiltC[idx];
+  if (!f) return;
+  const clave = (f.Serie + '-' + f.Number).toUpperCase();
+  const det = (bkCobradasBanco && bkCobradasBanco.detalle && bkCobradasBanco.detalle[clave]) || [];
+  if (!det.length) { alert('No encuentro la imputación de esta factura — recarga la página.'); return; }
+  const viejo = document.getElementById('imp-modal');
+  if (viejo) viejo.remove();
+  const div = document.createElement('div');
+  div.id = 'imp-modal';
+  div.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(15,31,92,.5);display:flex;align-items:center;justify-content:center';
+  div.innerHTML = '<div style="background:#fff;border-radius:14px;padding:22px;width:580px;max-width:94vw;max-height:85vh;overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.3)">' +
+    '<div style="font-weight:800;font-size:15px;color:#1a2e6e;margin-bottom:10px">🔍 ' + f.Serie + '-' + f.Number + ' — ¿dónde está imputada?</div>' +
+    det.map(m => {
+      const esRemesa = /REM\.|REMESA|RECIBOS|ADEUDOS/i.test(m.concepto || '');
+      const tipo = m.situacion === 'devuelto' ? '↩ DEVUELTA en' : esRemesa ? '🧩 Remesa' : '🏦 Cobro';
+      const color = m.situacion === 'devuelto' ? '#c0392b' : '#1b7a3d';
+      return '<div style="border:1px solid #e4e8f3;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12.5px">' +
+        '<div style="display:flex;gap:8px;align-items:center"><b style="color:' + color + '">' + tipo + '</b>' +
+        '<b>' + m.fecha + '</b> · ' + (m.banco || '') + ' · <b>' + bkFmt(m.importe) + '</b></div>' +
+        '<div style="color:#666;margin:4px 0">' + (m.concepto || '').slice(0, 90) + '</div>' +
+        '<button onclick="quitarImputacion(' + m.id + ',' + idx + ')" style="padding:5px 10px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">✕ Quitar la factura de aquí</button>' +
+        '</div>';
+    }).join('') +
+    '<div style="display:flex;gap:8px;margin-top:10px">' +
+      '<button onclick="document.getElementById(\'imp-modal\').remove();conciliarDesdeFactura(' + idx + ')" style="flex:1;padding:9px;background:#e87e1a;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">🔗 Imputar a otro cobro</button>' +
+      '<button onclick="document.getElementById(\'imp-modal\').remove()" style="padding:9px 16px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;font-size:13px;cursor:pointer">Cerrar</button>' +
+    '</div></div>';
+  div.onclick = e => { if (e.target === div) div.remove(); };
+  document.body.appendChild(div);
+}
+
+async function quitarImputacion(movId, idx) {
+  const f = facturasFiltC[idx];
+  if (!f) return;
+  const clave = (f.Serie + '-' + f.Number).toUpperCase();
+  if (!confirm('¿Quitar ' + f.Serie + '-' + f.Number + ' de este movimiento?\nEl resto del desglose del movimiento se conserva; la factura vuelve a pendiente (o a su otro cobro si lo tiene).')) return;
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const movs = (await r.json()).movimientos || [];
+    const m = movs.find(x => x.id === movId);
+    if (!m) { alert('No encuentro el movimiento.'); return; }
+    const nueva = (m.conciliado || []).filter(x => (x.serie + '-' + x.numero).toUpperCase() !== clave);
+    const r2 = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: movId, facturas: nueva })
+    });
+    if ((await r2.json()).ok) {
+      const modal = document.getElementById('imp-modal');
+      if (modal) modal.remove();
+      await refrescarEstadosCobro();
+    } else alert('✗ No se pudo guardar');
+  } catch(e) { alert('✗ ' + e.message); }
 }
 
 // 🔗 Conciliar DESDE la factura: busca en el banco los abonos pendientes que cuadran
@@ -1414,9 +1475,9 @@ function renderTablaFacturas() {
       : t <= 0
       ? '<span class="badge" style="background:#fde8e8;color:#c0392b">Devolución</span>'
       : esPagada
-        ? '<span class="badge badge-pagada">Pagada</span>'
+        ? '<span class="badge badge-pagada" onclick="verImputacion(' + i + ')" style="cursor:pointer" title="Ver a qué cobro o remesa está imputada (clic)">Pagada 🔍</span>'
         : esDevuelta
-          ? '<span class="badge badge-vencida">↩ Recibo devuelto · ' + dias + 'd</span>'
+          ? '<span class="badge badge-vencida" onclick="verImputacion(' + i + ')" style="cursor:pointer" title="Ver la remesa donde se devolvió (clic)">↩ Recibo devuelto · ' + dias + 'd</span>'
           : esVencida
             ? '<span class="badge badge-vencida">Vencida · ' + dias + 'd</span>'
             : '<span class="badge badge-pendiente">Pendiente · ' + dias + 'd</span>';
@@ -2942,8 +3003,8 @@ async function bkRemesas() {
       const esPropuesta = facts.some(f => f.origen === 'propuesta');
       const estado = facts.length
         ? (Math.abs(resto) < 0.01
-            ? (esPropuesta ? '<span style="color:#b45309;font-weight:700">🧮 cuadre propuesto</span>'
-                           : '<span style="color:#1b7a3d;font-weight:700">✓ desglosada</span>')
+            ? '<span style="color:#1b7a3d;font-weight:700">✓ desglosada</span>' +
+              (esPropuesta ? ' <span style="color:#b45309;font-size:10.5px" title="Cuadre manual, sin fichero del banco — editable">🧮 manual</span>' : '')
             : '<span style="color:#c96a10;font-weight:700">⚠ quedan ' + bkFmt(resto) + ' sin explicar</span>')
         : '<span style="color:#c0392b;font-weight:700">⏳ sin desglosar</span>';
       const detalle = facts.length
@@ -2957,7 +3018,9 @@ async function bkRemesas() {
               (f.cliente || '—') + (dev ? ' ↩ DEVUELTO' : '') +
               '</td><td style="text-align:right">' + bkFmt(f.importe) + '</td></tr>';
           }).join('') + '</table>' +
-          '<div style="text-align:right;margin-top:6px"><button onclick="remesaDeshacer(' + m.id + ')" title="Deshacer este desglose: el movimiento vuelve a pendientes y las facturas quedan libres" style="padding:4px 10px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;cursor:pointer">✕ Deshacer desglose</button></div>'
+          '<div style="text-align:right;margin-top:6px">' +
+          (esPropuesta ? '<button onclick="remesaEditarCuadre(' + m.id + ')" title="Editar el cuadre manual: añadir o quitar facturas" style="padding:4px 10px;background:#fff3e0;border:1px solid #e8b27a;color:#b45309;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px">✏ Editar cuadre</button>' : '') +
+          '<button onclick="remesaDeshacer(' + m.id + ')" title="Deshacer este desglose: el movimiento vuelve a pendientes y las facturas quedan libres" style="padding:4px 10px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;cursor:pointer">✕ Deshacer desglose</button></div>'
         : '<div style="font-size:12px;color:var(--texto-suave);margin-top:6px">Sin desglosar — súbeme el listado del banco con 📎 (PDF de Bankinter o TXT del Sabadell). ' +
           '<button onclick="remesaProponerCuadre(' + m.id + ')" style="margin-left:8px;padding:4px 10px;background:#fff3e0;border:1.5px solid #e8b27a;color:#b45309;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🧮 Proponer cuadre</button>' +
           '<button onclick="remesaCerrarSinDesglose(' + m.id + ',' + m.importe + ')" style="margin-left:6px;padding:4px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:6px;font-size:11px;cursor:pointer">✓ Cerrar sin desglose</button>' +
@@ -3045,10 +3108,12 @@ async function remesasImportarPDF(files) {
     } catch(e) { resumen.push('✗ ' + file.name + ': ' + e.message); continue; }
     if (!d.ok) { resumen.push('✗ ' + file.name + ': ' + d.error); continue; }
 
-    // Localizar el abono en el banco: mismo importe y fecha cercana (±4 días)
-    const mov = movs.find(m => m.importe > 0 && Math.abs(m.importe - d.importe) < 0.01 &&
+    // Localizar el abono: por importe NOMINAL o por LÍQUIDO (Sabadell abona neto de comisiones), fecha cercana (±4 días)
+    const mov = movs.find(m => m.importe > 0 &&
+      (Math.abs(m.importe - d.importe) < 0.01 || (d.liquido && Math.abs(m.importe - d.liquido) < 0.01)) &&
       (!d.fecha_abono || !m.fecha || Math.abs(new Date(m.fecha) - new Date(d.fecha_abono)) <= 4 * 86400000));
-    if (!mov) { resumen.push('✗ ' + file.name + ': no veo el abono de ' + bkFmt(d.importe) + ' (' + (d.fecha_abono || '¿fecha?') + ') en los movimientos — sincroniza ese período del banco'); continue; }
+    if (!mov) { resumen.push('✗ ' + file.name + ': no veo el abono de ' + bkFmt(d.importe) + (d.liquido ? ' (ni el líquido ' + bkFmt(d.liquido) + ')' : '') + ' (' + (d.fecha_abono || '¿fecha?') + ') en los movimientos — sincroniza ese período del banco'); continue; }
+    const abonoLiquido = d.liquido && Math.abs(mov.importe - d.liquido) < 0.01 && Math.abs(d.importe - d.liquido) > 0.005;
 
     const usadasLoc = new Set();
     const entradas = [];
@@ -3080,6 +3145,12 @@ async function remesasImportarPDF(files) {
       }
     });
 
+    // Si el banco abonó el LÍQUIDO, la diferencia son comisiones/impuestos — línea propia para cuadrar al céntimo
+    if (abonoLiquido) {
+      entradas.push({ serie: 'GASTOS', numero: 'comisiones remesa',
+        importe: -Math.round((d.importe - d.liquido) * 100) / 100,
+        cliente: 'Comisiones e impuestos del banco', situacion: 'abonado' });
+    }
     try {
       const r2 = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
         method: 'POST',
@@ -3087,7 +3158,7 @@ async function remesasImportarPDF(files) {
         body: JSON.stringify({ id: mov.id, facturas: entradas })
       });
       if ((await r2.json()).ok) {
-        resumen.push('✓ ' + file.name + ': remesa de ' + bkFmt(d.importe) + ' → ' + d.recibos.length + ' recibos (' +
+        resumen.push('✓ ' + file.name + ': remesa de ' + bkFmt(d.importe) + (abonoLiquido ? ' (líquido ' + bkFmt(d.liquido) + ')' : '') + ' → ' + d.recibos.length + ' recibos (' +
           conFactura + ' con factura' + (devueltos ? ', ' + devueltos + ' DEVUELTOS' : '') + ')');
       } else resumen.push('✗ ' + file.name + ': error guardando la conciliación');
     } catch(e) { resumen.push('✗ ' + file.name + ': ' + e.message); }
@@ -3140,6 +3211,41 @@ async function remesaProponerCuadre(id) {
                 noRecibo: new Set(noRecibo.map(c => c.clave)) };
   (sol || []).forEach(c => { remCuadre.sel[c.clave] = c; });
   remCuadreAbrir(sol ? ventanaUsada : 0);
+}
+
+// ✏ Editar un cuadre manual existente: reabre el taller con su selección actual pre-marcada
+async function remesaEditarCuadre(id) {
+  const m = (bkRemesasDatos.remesas || []).find(x => x.id === id);
+  if (!m) { alert('No encuentro la remesa — recarga con ⟳.'); return; }
+  // Facturas usadas en OTROS movimientos (las de ESTA remesa deben poder verse y editarse)
+  let usadas = new Set();
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    ((await r.json()).movimientos || []).forEach(x => {
+      if (x.id === id) return;
+      (x.conciliado || []).forEach(f => usadas.add(f.serie + '-' + f.numero));
+    });
+  } catch(e) { alert('Error: ' + e.message); return; }
+  const base = bkCandidatos({ importe: 1 }).filter(c =>
+    !usadas.has(c.clave) && c.fecha && (!m.fecha || c.fecha <= m.fecha) &&
+    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || ''));
+  const conRecibo = base.filter(c => c.recibo);
+  const sinRecibo = base.filter(c => !c.recibo);
+  const pool = conRecibo.concat(sinRecibo).sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+  // Selección actual: si alguna factura del desglose no está cargada, entra como entrada sintética
+  const sel = {};
+  (m.conciliado || []).forEach(f => {
+    const clave = f.serie + '-' + f.numero;
+    let c = pool.find(x => x.clave === clave);
+    if (!c) {
+      c = { clave: clave, serie: f.serie, numero: f.numero, fecha: '(otro período)', importe: f.importe || 0, cliente: f.cliente || '' };
+      pool.unshift(c);
+    }
+    sel[clave] = c;
+  });
+  remCuadre = { id: id, objetivo: m.importe, fecha: m.fecha, pool: pool, sel: sel,
+                noRecibo: new Set(sinRecibo.map(c => c.clave)) };
+  remCuadreAbrir(0);
 }
 
 // Modal de cuadre manual de remesa: propuesta pre-marcada + selección libre con suma en vivo
