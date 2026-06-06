@@ -443,9 +443,9 @@
     <!-- PERIOD BAR (shared) -->
     <div class="period-bar" id="period-bar">
       <label>Período</label>
-      <input type="date" id="c-desde" />
+      <input type="date" id="c-desde" onchange="try{actualizarCobros()}catch(e){}" />
       <span style="color:var(--texto-suave)">—</span>
-      <input type="date" id="c-hasta" />
+      <input type="date" id="c-hasta" onchange="try{actualizarCobros()}catch(e){}" />
       <div class="period-shortcuts">
         <button class="shortcut-btn" onclick="setPeriod('month', event)">Este mes</button>
         <button class="shortcut-btn" onclick="setPeriod('q1', event)">T1</button>
@@ -949,6 +949,9 @@ function setPeriod(type, evt) {
   document.getElementById('c-hasta').value = fmt(hasta > hoy ? hoy : hasta);
   const tgt = (evt && evt.target) || (typeof event !== 'undefined' && event.target);
   if (tgt && tgt.classList) tgt.classList.add('active');
+  // Las vistas que filtran por período se refrescan en vivo (con los datos ya cargados;
+  // si el período pedido va más atrás de lo cargado, toca 🔍 Cargar datos)
+  try { actualizarCobros(); } catch(e) {}
 }
 
 // ===== API =====
@@ -2206,9 +2209,18 @@ async function auditarCartera() {
 }
 
 function actualizarCobros() {
+  // TODOS los widgets de esta página respetan el período de la barra superior
+  const perDesde0 = (document.getElementById('c-desde') || {}).value || '';
+  const perHasta0 = (document.getElementById('c-hasta') || {}).value || '';
+  const enPeriodo = f => {
+    const fF = (f.Date || '').slice(0, 10);
+    if (perDesde0 && fF && fF < perDesde0) return false;
+    if (perHasta0 && fF && fF > perHasta0) return false;
+    return true;
+  };
   const metodos = {};
   const hoy = new Date();
-  todasFacturasC.forEach(f => {
+  todasFacturasC.filter(enPeriodo).forEach(f => {
     const pagos = f.Payments || [];
     pagos.forEach(p => {
       const m = p.MethodName || 'Otros';
@@ -2234,11 +2246,12 @@ function actualizarCobros() {
       ).join('') + '<div class="iva-row"><span class="iva-label" style="font-weight:700">Total cobrado</span><span class="iva-value">' + Object.values(metodos).reduce((s,d) => s+d.total,0).toFixed(2) + '€</span></div>'
     : '<div style="color:var(--texto-suave);font-size:13px">Sin datos.</div>';
 
-  // Pendientes
+  // Pendientes — mismo filtro de período
   const banco = (bkCobradasBanco && bkCobradasBanco.cobradas) ? bkCobradasBanco : null;
   calcularAnuladas();
   const pendientes = todasFacturasC.filter(f => {
     if (f._tipo !== 'factura') return false;
+    if (!enPeriodo(f)) return false;
     if (/^(T|TD|D)$/i.test(f.Serie || '')) return false;  // tickets simplificados: fuera de la cartera
     const t = f.Totals ? f.Totals.GrossAmount : 0;
     if (t <= 0) return false;  // devoluciones: no se cobran
@@ -3529,6 +3542,7 @@ async function bkRemesas() {
               '<button onclick="remesaQuitarRecibo(' + m.id + ',' + fi + ')" title="Quitar SOLO este recibo del desglose (la factura queda libre; el resto del desglose no se toca)" style="padding:1px 7px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:5px;font-size:10.5px;cursor:pointer">✕</button></td></tr>';
           }).join('') + '</table>' +
           '<div style="text-align:right;margin-top:6px">' +
+          (Math.abs(resto) >= 0.01 ? '<button onclick="remesaExplicarDescuadre(' + m.id + ')" title="Anotar el motivo de los ' + bkFmt(resto) + ' sin explicar (gastos, cliente desaparecido, error...): la remesa quedará cuadrada y el porqué escrito para la contable" style="padding:4px 10px;background:#fff3e0;border:1.5px solid #e8b27a;color:#b45309;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px">⚖ Explicar descuadre</button>' : '') +
           '<button onclick="remesaAsignarManual(' + m.id + ',-1)" title="Añadir factura(s) del listado a este desglose (una o varias a la vez, contra lo que quede sin explicar)" style="padding:4px 10px;background:#1a7a3f;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px">➕ Añadir facturas</button>' +
           (facts.some(x => x.serie === '—') ? '<button onclick="remesaDeducir(' + m.id + ')" title="Deducir las facturas de los recibos sin localizar, por cliente e importes" style="padding:4px 10px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px">🪄 Deducir facturas</button>' : '') +
           (esPropuesta ? '<button onclick="remesaEditarCuadre(' + m.id + ')" title="Editar el cuadre manual: añadir o quitar facturas" style="padding:4px 10px;background:#fff3e0;border:1px solid #e8b27a;color:#b45309;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px">✏ Editar cuadre</button>' : '') +
@@ -3935,6 +3949,29 @@ async function remCuadreGuardar() {
       bkRemesas();
     } else alert('✗ No se pudo guardar');
   } catch(e) { alert('✗ ' + e.message); }
+}
+
+// ⚖ Explica el resto sin cuadrar de una remesa: pide el motivo (modal de descuadres) y lo
+// anota como línea del desglose — la remesa pasa a ✓ desglosada y el porqué queda escrito.
+async function remesaExplicarDescuadre(movId) {
+  const m = (bkRemesasDatos.remesas || []).find(x => x.id === movId);
+  if (!m || !m.conciliado || !m.conciliado.length) return;
+  const resto = Math.round((m.importe - m.conciliado.reduce((s, x) => s + (x.importe || 0), 0)) * 100) / 100;
+  if (Math.abs(resto) < 0.01) { alert('Esta remesa ya cuadra al céntimo.'); return; }
+  const res = await bkPedirDescuadre(resto, '', {});
+  if (!res || res === 'sin') return;
+  const nuevo = m.conciliado.concat([Object.assign(res, { situacion: 'abonado' })]);
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: movId, facturas: nuevo })
+    });
+    if ((await r.json()).ok) {
+      refrescarEstadosCobro();
+      bkRemesas();
+    } else alert('✗ No se pudo guardar');
+  } catch(err) { alert('✗ ' + err.message); }
 }
 
 // ↩ Marca/desmarca a MANO un recibo como devuelto dentro de su remesa (el Sabadell no
