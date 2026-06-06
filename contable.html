@@ -1310,6 +1310,7 @@ function bkPedirDescuadre(dif, cliente, opciones) {
       '<div id="bk-desc-ops" style="display:flex;flex-direction:column;gap:6px"></div>' +
       '<input id="bk-desc-otro" placeholder="✏ Otro motivo o detalle adicional (texto libre)..." style="margin-top:8px;width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid #dde;border-radius:8px;font-size:13px;font-family:inherit"/>' +
       '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">' +
+        (opciones && opciones.parcial ? '<button id="bk-desc-parcial" title="Guardar lo seleccionado y seguir añadiendo facturas más adelante (el movimiento quedará 🧮 Parcial con botón ✚ Seguir)" style="flex:1;padding:9px;background:#e87e1a;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">💾 Guardar parcial (seguiré añadiendo)</button>' : '') +
         '<button id="bk-desc-ok" style="flex:1;padding:9px;background:#1a2e6e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✓ Anotar descuadre</button>' +
         (opciones && opciones.sinExplicar ? '<button id="bk-desc-sin" title="Conciliar dejando la diferencia sin explicar (no recomendado)" style="padding:9px 12px;background:#fff3e0;border:1.5px solid #e8b27a;color:#b45309;border-radius:8px;font-size:12px;cursor:pointer">Sin explicar</button>' : '') +
         '<button id="bk-desc-no" style="padding:9px 12px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;font-size:13px;cursor:pointer">Cancelar</button>' +
@@ -1337,6 +1338,8 @@ function bkPedirDescuadre(dif, cliente, opciones) {
     };
     const sin = div.querySelector('#bk-desc-sin');
     if (sin) sin.onclick = () => fin('sin');
+    const par = div.querySelector('#bk-desc-parcial');
+    if (par) par.onclick = () => fin('parcial');
     div.querySelector('#bk-desc-no').onclick = () => fin(null);
     div.onclick = e => { if (e.target === div) fin(null); };
   });
@@ -3001,12 +3004,18 @@ function bkRender() {
     th('importe', 'Importe', 'text-align:right;') + th('estado', 'Estado') + '<th></th></tr>' +
     lista.map(m => {
       const conc = m.conciliado;
+      // Conciliación PARCIAL: lo asignado no llega al importe del movimiento → se ve y se puede seguir
+      const restoConc = conc ? Math.round((Math.abs(m.importe) - conc.reduce((s, f) => s + (f.importe || 0), 0)) * 100) / 100 : 0;
+      const esParcial = conc && restoConc > 0.01;
       const badge = conc
-        ? '<span style="background:#e8f7ef;color:#1a7a3f;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">✅ ' + conc.map(f => f.serie + '-' + f.numero).join(', ') + '</span>'
+        ? (esParcial
+          ? '<span style="background:#fff4e0;color:#b45309;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">🧮 Parcial: ' + conc.map(f => f.serie + '-' + f.numero).join(', ') + ' · quedan ' + bkFmt(restoConc) + '</span>'
+          : '<span style="background:#e8f7ef;color:#1a7a3f;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">✅ ' + conc.map(f => f.serie + '-' + f.numero).join(', ') + '</span>')
         : '<span style="background:#fff4e0;color:#c96a10;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">⏳ Pendiente</span>';
       const catBadge = m.categoria ? ' <span style="background:#e0f2fe;color:#0e7490;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700">🏷 ' + (BK_CATS[m.categoria] || m.categoria) + '</span>' : '';
       const acciones = conc
-        ? '<button onclick="bkDesconciliar(' + m.id + ')" style="padding:4px 10px;background:#fde8e8;border:1.5px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">✕ Deshacer</button>'
+        ? (esParcial ? '<button onclick="bkContinuarConciliacion(' + m.id + ')" title="Seguir añadiendo facturas a este movimiento (lo ya asignado se conserva)" style="padding:4px 10px;background:#e87e1a;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">✚ Seguir</button> ' : '') +
+          '<button onclick="bkDesconciliar(' + m.id + ')" style="padding:4px 10px;background:#fde8e8;border:1.5px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">✕ Deshacer</button>'
         : '<button onclick="bkAbrirConciliar(' + m.id + ')" style="padding:4px 10px;background:#1a2e6e;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🔗 Conciliar</button>' +
           ' <button onclick="bkCruzar(' + m.id + ')" title="Cruzar con el movimiento contrario (anticipos cobrados y devueltos, cargos anulados...)" style="padding:4px 7px;background:#f0f4fb;border:1px solid #c0cbea;border-radius:6px;font-size:11px;cursor:pointer">⇄</button>';
       return '<tr style="border-bottom:1px solid #f3f3f3">' +
@@ -3358,13 +3367,16 @@ async function bkGuardarConciliacion() {
       suma = objetivo;
     }
   }
-  // Descuadre: en vez de un "¿conciliar igualmente?" a ciegas, se pide el MOTIVO y se anota
+  // Descuadre: en vez de un "¿conciliar igualmente?" a ciegas, se pide el MOTIVO y se anota.
+  // Si el movimiento es MAYOR que lo seleccionado (ingreso de cajero "FRAS VARIAS"...),
+  // también se puede 💾 guardar PARCIAL e ir añadiendo facturas más adelante (✚ Seguir).
   let lineaDescuadre = null;
   if (Math.abs(suma - objetivo) >= 0.005) {
-    const res = await bkPedirDescuadre(Math.round((objetivo - suma) * 100) / 100,
-      (seles[0] && seles[0].cliente) || '', { sinExplicar: true });
+    const difD = Math.round((objetivo - suma) * 100) / 100;
+    const res = await bkPedirDescuadre(difD, (seles[0] && seles[0].cliente) || '',
+      { sinExplicar: true, parcial: difD > 0 });
     if (res === null) return;
-    if (res !== 'sin') lineaDescuadre = res;
+    if (res !== 'sin' && res !== 'parcial') lineaDescuadre = res;
   }
   try {
     const lista = seles.map(c => {
@@ -3453,6 +3465,32 @@ async function bkGuardarCategoria(id, categoria) {
     });
     bkCargar();
   } catch(e) { alert('✗ ' + e.message); }
+}
+
+// ✚ SEGUIR con una conciliación PARCIAL: reabre el modal con lo ya asignado precargado
+// (marcado en la lista) — añades más facturas y al guardar se sustituye TODO el conjunto.
+function bkContinuarConciliacion(id) {
+  const m = bkMovs.find(x => x.id === id);
+  if (!m) return;
+  bkMovActual = m;
+  bkSoloSeleccion = false;
+  bkSeleccion = {};
+  (m.conciliado || []).forEach(e => {
+    const clave = e.ruta ? 'PROV:' + e.ruta : (e.serie || '') + '-' + (e.numero || '');
+    const sel = { serie: e.serie, numero: e.numero, importe: e.importe || 0,
+                  cliente: e.cliente || '', clave: clave };
+    if (e.ruta) sel.ruta = e.ruta;
+    if (e.parcial) sel.parcial = true;
+    bkSeleccion[clave] = sel;
+  });
+  document.getElementById('bk-modal-mov').innerHTML =
+    '<b>' + bkMovActual.fecha + '</b> · ' + (bkMovActual.banco || '') +
+    '<br>' + (bkMovActual.concepto || '—') +
+    '<br><span style="font-size:16px;font-weight:800;color:' + (bkMovActual.importe >= 0 ? '#1a7a3f' : '#c0392b') + '">' + bkFmt(bkMovActual.importe) + '</span>' +
+    ' <span style="font-size:11.5px;color:#b45309;font-weight:700">🧮 parcial — lo ya asignado viene marcado; añade más y guarda</span>';
+  document.getElementById('bk-modal-buscar').value = '';
+  bkModalRender();
+  document.getElementById('bk-modal').style.display = 'flex';
 }
 
 async function bkDesconciliar(id) {
