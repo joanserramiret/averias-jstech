@@ -1082,11 +1082,17 @@ function actualizarDashboard() {
 
   todasFacturasC.forEach(f => {
     if (f._tipo !== 'factura') return;
-    const serie = f.Serie || '';
-    if (serie === 'FD' || serie === 'APPFD') return;
     const t = f.Totals ? f.Totals.GrossAmount : 0;
-    totalAnio += t; nAnio++;
-    if ((f.Date || '').slice(0, 7) === mesActual) { totalMes += t; nMes++; }
+    const mesF = (f.Date || '').slice(0, 7);
+
+    // FACTURADO NETO: ventas menos devoluciones. Las devoluciones (FD, D...) vienen con importe
+    // NEGATIVO y deben RESTAR del facturado (antes se excluían y por eso mentía).
+    totalAnio += t;
+    if (mesF === mesActual) totalMes += t;
+    if (t > 0) { nAnio++; if (mesF === mesActual) nMes++; }  // contar solo ventas, no devoluciones
+
+    // COBROS / PENDIENTES: solo sobre ventas reales (positivas); las devoluciones no se "cobran"
+    if (t <= 0) return;
 
     const pagos = f.Payments || [];
     const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
@@ -2099,6 +2105,9 @@ async function bkCargar() {
       fetch(BRIDGE_URL_C + '/banco/resumen', { headers: { 'ngrok-skip-browser-warning': 'true' } })
     ]);
     bkMovs = (await rMov.json()).movimientos || [];
+    // Facturas ya usadas en CUALQUIER conciliación (para no ofrecerlas otra vez)
+    bkUsadas = new Set();
+    bkMovs.forEach(m => (m.conciliado || []).forEach(f => bkUsadas.add((f.serie + '-' + f.numero).toUpperCase())));
     bkActualizarBancos();
     const res = await rRes.json();
     // Cuadre = % de movimientos explicados (conciliados con documento o categorizados)
@@ -2347,9 +2356,15 @@ function bkNombreEnConcepto(cliente, concepto) {
   return hits >= Math.min(2, toks.length);
 }
 
+let bkUsadas = new Set();  // facturas ya conciliadas en algún movimiento
+
 function bkModalRender() {
   const q = (document.getElementById('bk-modal-buscar').value || '').toLowerCase();
   let cands = bkCandidatos(bkMovActual);
+  // No ofrecer las que ya están conciliadas en otro movimiento (salvo las preseleccionadas de ESTE)
+  const totalCands = cands.length;
+  cands = cands.filter(c => !bkUsadas.has((c.clave || '').toUpperCase()) || bkSeleccion[c.clave]);
+  const ocultadas = totalCands - cands.length;
   if (!cands.length) {
     const msj = (bkMovActual && bkMovActual.importe < 0)
       ? '⚠ No hay facturas de proveedor escaneadas. Ve a la pestaña 📁 Proveedores y pulsa "🔍 Escanear importes".'
@@ -2361,6 +2376,10 @@ function bkModalRender() {
   }
   if (q) cands = cands.filter(c => c.clave.toLowerCase().includes(q) || c.cliente.toLowerCase().includes(q));
   let banner = '';
+  if (ocultadas > 0 && !bkSoloSeleccion) {
+    banner += '<div style="padding:6px 10px;background:#eef4ff;border-bottom:1px solid #d4e0f5;font-size:11.5px;color:#1a2e6e">' +
+      'ℹ ' + ocultadas + ' factura(s) ya conciliada(s) en otro movimiento, ocultadas.</div>';
+  }
   if (bkSoloSeleccion && !q) {
     cands = cands.filter(c => !!bkSeleccion[c.clave]);
     banner = '<div style="padding:8px 10px;background:#fff3e0;border-bottom:1px solid #f0d9b5;font-size:12px;color:#b45309">' +
