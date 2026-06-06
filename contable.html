@@ -3464,8 +3464,19 @@ async function remAsigGuardar() {
   const seles = Object.values(remAsig.sel);
   if (!seles.length) { alert('Marca al menos una factura.'); return; }
   const suma = seles.reduce((s, c) => s + c.importe, 0);
-  if (Math.abs(suma - remAsig.objetivo) >= 0.01 &&
-      !confirm('La selección suma ' + bkFmt(suma) + ' y el recibo es de ' + bkFmt(remAsig.objetivo) + ' — no cuadra exacto.\n¿Asignar igualmente?')) return;
+  const dif = Math.round((remAsig.objetivo - suma) * 100) / 100;
+  let lineaGastos = null;
+  if (dif >= 0.01) {
+    // El recibo cobra MÁS que la(s) factura(s): gastos repercutidos al cliente
+    // (típico recobro de recibo devuelto: factura + gastos de devolución del banco)
+    if (!confirm('Tu factura suma ' + bkFmt(suma) + ' y el recibo es de ' + bkFmt(remAsig.objetivo) + '.\n\n' +
+      'La diferencia de ' + bkFmt(dif) + ' se anotará como "gastos repercutidos (dev. banco)" para que cuadre al céntimo.\n¿Continuar?')) return;
+    lineaGastos = { serie: 'GASTOS', numero: 'gastos repercutidos (dev. banco)', importe: dif,
+      cliente: remAsig.cliente, situacion: remAsig.situacion };
+  } else if (dif <= -0.01 &&
+      !confirm('Ojo: la selección suma ' + bkFmt(suma) + ', MÁS que el recibo (' + bkFmt(remAsig.objetivo) + ').\n¿Asignar igualmente?')) {
+    return;
+  }
   const m = (bkRemesasDatos.remesas || []).find(x => x.id === remAsig.movId);
   if (!m) return;
   // LA VERDAD MANUAL PREVALECE: si alguna seleccionada estaba imputada en otro movimiento
@@ -3507,9 +3518,11 @@ async function remAsigGuardar() {
     } catch(e) { alert('✗ Error liberando las facturas: ' + e.message); return; }
   }
   const nuevo = m.conciliado.slice();
-  nuevo.splice(remAsig.fi, 1, ...seles.map(c => ({ serie: c.serie, numero: c.numero,
-    importe: seles.length === 1 ? remAsig.objetivo : c.importe,
-    cliente: remAsig.cliente + ' ✎', situacion: remAsig.situacion })));
+  const reemplazo = seles.map(c => ({ serie: c.serie, numero: c.numero,
+    importe: c.importe,
+    cliente: remAsig.cliente + ' ✎', situacion: remAsig.situacion }));
+  if (lineaGastos) reemplazo.push(lineaGastos);
+  nuevo.splice(remAsig.fi, 1, ...reemplazo);
   try {
     const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
       method: 'POST',
