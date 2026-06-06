@@ -773,6 +773,19 @@
         </div>
         <div id="pv-lista"><div style="color:var(--texto-suave);font-size:13px">Pulsa ⟳ para cargar.</div></div>
       </div>
+
+      <!-- NÓMINAS -->
+      <div class="card" style="margin-top:14px">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <span>🧾 Nóminas <span style="font-weight:400;font-size:12px;color:var(--texto-suave)">(se leen solas: trabajador, mes y líquido — y concilian con los cargos del banco)</span></span>
+          <span style="display:flex;gap:8px;align-items:center">
+            <input type="file" id="nom-pdf" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif" multiple style="display:none" onchange="nomImportar(this.files)"/>
+            <button onclick="document.getElementById('nom-pdf').click()" title="Sube los recibos de salarios de la gestoría (PDF o foto) — se leen y archivan solos por mes" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📥 Importar nóminas (PDF/foto)</button>
+            <button onclick="nomCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
+          </span>
+        </div>
+        <div id="nom-lista"><div style="color:var(--texto-suave);font-size:13px">Pulsa ⟳ para cargar las nóminas del año.</div></div>
+      </div>
     </div>
 
     <!-- IVA TAB -->
@@ -2818,9 +2831,19 @@ function bkCandidatos(mov) {
       .sort((a, b) => (dev.has(bkNormClave(b.serie + '-' + b.numero)) ? 1 : 0) -
                       (dev.has(bkNormClave(a.serie + '-' + a.numero)) ? 1 : 0));
   }
-  // Cargos (importe negativo) → facturas de PROVEEDOR extraídas del Dropbox
+  // Cargos (importe negativo) → facturas de PROVEEDOR extraídas del Dropbox + NÓMINAS importadas
   if (mov && mov.importe < 0) {
-    return Object.values(pvDatos)
+    const noms = (typeof nomDatos !== 'undefined' ? nomDatos : [])
+      .filter(n => n.liquido > 0)
+      .map(n => ({
+        clave: 'PROV:NOM/' + n.ruta,
+        serie: 'NOM', numero: '🧾 Nómina ' + (n.mes || '') + ' · ' + (n.trabajador || n.nombre),
+        ruta: 'NOM/' + n.ruta,
+        fecha: n.mes ? n.mes + '-28' : '',
+        importe: n.liquido,
+        cliente: n.trabajador || ''
+      }));
+    return noms.concat(Object.values(pvDatos)
       .filter(f => f.total > 0 && ['ok','corregido','ocr'].includes(f.estado))
       .map(f => ({
         clave: 'PROV:' + f.ruta,
@@ -2829,7 +2852,7 @@ function bkCandidatos(mov) {
         fecha: f.fecha || '',
         importe: f.total,
         cliente: f.proveedor || ''
-      }));
+      })));
   }
   // Abonos → facturas de venta de Ágora
   return (typeof todasFacturasC !== 'undefined' ? todasFacturasC : [])
@@ -2877,6 +2900,10 @@ function bkVerDocCand(ci) {
   const c = bkCandsVisibles[ci];
   if (!c || (c.clave || '').indexOf('PROV:') !== 0) return;
   const ruta = c.clave.slice(5);
+  if (ruta.indexOf('NOM/') === 0) {  // nómina: su documento vive en NOMINAS/<año>/
+    window.open(BRIDGE_URL_C + '/nominas/doc?ruta=' + encodeURIComponent(ruta.slice(4)));
+    return;
+  }
   const anio = ruta.split('/')[0];
   window.open(BRIDGE_URL_C + '/proveedores/abrir?anio=' + anio + '&ruta=' + encodeURIComponent(ruta.slice(anio.length + 1)));
 }
@@ -2884,6 +2911,10 @@ function bkVerDocCand(ci) {
 async function bkCorregirCand(ci) {
   const c = bkCandsVisibles[ci];
   if (!c || (c.clave || '').indexOf('PROV:') !== 0) return;
+  if (c.clave.indexOf('PROV:NOM/') === 0) {
+    alert('Es una nómina: si el líquido está mal leído, bórrala (🗑) en el panel 🧾 Nóminas de Facturas recibidas y re-impórtala.');
+    return;
+  }
   const v = prompt('Importe TOTAL correcto (con IVA) de:\n' + c.numero + ' · ' + (c.cliente || '') + '\n\n(mira el 👁 documento si dudas)', String(c.importe));
   if (v === null) return;
   const imp = parseFloat(String(v).replace(/\./g, '').replace(',', '.')) || parseFloat(String(v).replace(',', '.'));
@@ -4065,6 +4096,88 @@ async function pvCargarDatos(anio) {
       ((await r.json()).facturas || []).forEach(f => { pvDatos[f.ruta] = f; });
     } catch(e) { /* año sin datos: seguir */ }
   }
+  nomCargarDatos(anio);  // las nóminas acompañan: también son candidatas de los cargos del banco
+  nomRender();
+}
+
+// ── 🧾 NÓMINAS: recibos de salarios — se leen, se archivan y concilian con el banco ──
+let nomDatos = [];
+
+async function nomCargarDatos(anio) {
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/nominas/datos?anio=' + (anio || document.getElementById('pv-anio').value || new Date().getFullYear()),
+      { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    nomDatos = (await r.json()).nominas || [];
+  } catch(e) { /* bridge dormido */ }
+}
+
+async function nomCargar() {
+  await nomCargarDatos();
+  nomRender();
+}
+
+function nomRender() {
+  const el = document.getElementById('nom-lista');
+  if (!el) return;
+  if (!nomDatos.length) {
+    el.innerHTML = '<div style="color:var(--texto-suave);font-size:13px">Sin nóminas importadas este año. Botón 📥 para subir los recibos de la gestoría (PDF o foto).</div>';
+    return;
+  }
+  const MESES_TXT = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const porMes = {};
+  nomDatos.forEach(n => { (porMes[n.mes || '¿mes?'] = porMes[n.mes || '¿mes?'] || []).push(n); });
+  el.innerHTML = Object.keys(porMes).sort().reverse().map(mes => {
+    const lista = porMes[mes];
+    const totLiq = lista.reduce((s, n) => s + (n.liquido || 0), 0);
+    const totCoste = lista.reduce((s, n) => s + (n.coste || 0), 0);
+    const nomMes = /^\d{4}-\d{2}$/.test(mes) ? MESES_TXT[parseInt(mes.slice(5)) - 1] + ' ' + mes.slice(0, 4) : mes;
+    const filas = lista.map(n =>
+      '<tr style="border-bottom:1px solid #f3f3f3">' +
+      '<td style="padding:5px;font-weight:700;color:#1a2e6e">' + (n.trabajador || '—') + '</td>' +
+      '<td style="white-space:nowrap;text-align:right;font-weight:800;color:#1a7a3f">' + bkFmt(n.liquido || 0) + '</td>' +
+      '<td style="white-space:nowrap;text-align:right;color:#888">' + (n.coste ? bkFmt(n.coste) : '—') + '</td>' +
+      '<td style="text-align:right;white-space:nowrap">' +
+        '<a href="' + BRIDGE_URL_C + '/nominas/doc?ruta=' + encodeURIComponent(n.ruta) + '" target="_blank" style="padding:3px 10px;background:#1a2e6e;color:#fff;border-radius:6px;font-size:11px;font-weight:700;text-decoration:none">👁 Ver</a>' +
+        '<button onclick="nomBorrar(\'' + n.ruta.replace(/'/g, "\\'") + '\')" title="Quitar (el archivo va a PARA BORRAR)" style="padding:3px 8px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:6px;font-size:11px;cursor:pointer;margin-left:4px">🗑</button></td></tr>').join('');
+    return '<div style="font-weight:800;font-size:13px;color:#1a2e6e;margin:12px 0 4px">' + nomMes +
+      ' <span style="font-weight:400;color:#888">(' + lista.length + ' nómina(s) · líquido <b>' + bkFmt(totLiq) + '</b>' +
+      (totCoste ? ' · coste empresa ' + bkFmt(totCoste) : '') + ')</span></div>' +
+      '<table style="width:100%;border-collapse:collapse;font-size:12.5px">' +
+      '<tr style="color:#aaa;font-size:11px"><th style="text-align:left;padding:4px">Trabajador</th><th style="text-align:right">Líquido</th><th style="text-align:right">Coste empresa</th><th></th></tr>' +
+      filas + '</table>';
+  }).join('');
+}
+
+async function nomImportar(files) {
+  if (!files || !files.length) return;
+  let ok = 0, errores = [];
+  for (const f of files) {
+    try {
+      const r = await fetch(BRIDGE_URL_C + '/nominas/importar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ nombre: f.name, pdf_base64: await blobABase64C(f) })
+      });
+      const d = await r.json();
+      if (d.ok) ok++; else errores.push(f.name + ': ' + (d.error || 'error'));
+    } catch(e) { errores.push(f.name + ': ' + e.message); }
+  }
+  document.getElementById('nom-pdf').value = '';
+  alert('🧾 ' + ok + ' nómina(s) importada(s) y archivada(s).' +
+    (errores.length ? '\n✗ ' + errores.join('\n✗ ') : '') +
+    (ok ? '\n\nYa salen como candidatas al conciliar los cargos del banco (con su 👁).' : ''));
+  nomCargar();
+}
+
+async function nomBorrar(ruta) {
+  if (!confirm('¿Quitar esta nómina? El archivo se mueve a PARA BORRAR del Dropbox.')) return;
+  try {
+    await fetch(BRIDGE_URL_C + '/nominas/borrar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ ruta: ruta })
+    });
+    nomCargar();
+  } catch(e) { alert('✗ ' + e.message); }
 }
 
 async function pvEscanear() {
