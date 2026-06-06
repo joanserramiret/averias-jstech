@@ -711,7 +711,8 @@
       <div class="card">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
           <span>🧩 Remesas y devoluciones <span style="font-weight:400;font-size:12px;color:var(--texto-suave)">(para no tener que entrar al banco)</span></span>
-          <span style="display:flex;gap:8px;align-items:center">
+          <span style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input type="text" id="rem-buscar" oninput="remesaBuscarFactura()" placeholder="🔎 ¿Está negociada? Busca factura (F-7602), cliente o importe..." style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;font-family:inherit;width:290px"/>
             <input type="file" id="rem-pdf" accept=".pdf,.txt,.jpg,.jpeg,.png,.webp,.gif" multiple style="display:none" onchange="remesasImportarPDF(this.files)"/>
             <button onclick="document.getElementById('rem-pdf').click()" title="Sube el documento del banco (PDF, TXT o foto/imagen — las imágenes y escaneos se leen con OCR) y desgloso recibo a recibo" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📎 Documento del banco (PDF/TXT/foto)</button>
             <button onclick="remesasLimpiarDesgloses()" title="Deshace los desgloses automáticos antiguos (inventados por suma de importes)" style="padding:6px 12px;background:#fde8e8;border:1.5px solid #e0b0b0;color:#c0392b;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🧹 Deshacer desgloses inventados</button>
@@ -719,6 +720,7 @@
             <button onclick="bkRemesas()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
           </span>
         </div>
+        <div id="rem-buscar-res"></div>
         <div id="bk-remesas"><div style="color:var(--texto-suave);font-size:13px">Cargando remesas...</div></div>
       </div>
     </div>
@@ -4047,6 +4049,55 @@ async function remesaToggleDevuelto(movId, fi) {
       bkRemesas();
     } else alert('✗ No se pudo guardar');
   } catch(err) { alert('✗ ' + err.message); }
+}
+
+// 🔎 ¿Está negociada esta factura? Busca DENTRO de todos los desgloses de remesa
+// (por nº de factura, cliente o importe). Si no está en ninguna, mira si aparece
+// cobrada por otra vía (transferencia) — y si tampoco, es que NO se ha negociado.
+function remesaBuscarFactura() {
+  const out = document.getElementById('rem-buscar-res');
+  if (!out) return;
+  const q = (document.getElementById('rem-buscar').value || '').trim();
+  if (q.length < 2) { out.innerHTML = ''; return; }
+  const qn = bkNormClave(q);
+  const ql = q.toLowerCase();
+  const qImp = parseFloat(q.replace(/\./g, '').replace(',', '.'));
+  const hits = [];
+  (bkRemesasDatos.remesas || []).forEach(m => {
+    bkClavesDeConciliado(m.conciliado).forEach(([k, f]) => {
+      if ((f.serie || '').toUpperCase() === 'GASTOS' || (f.serie || '').toUpperCase() === 'DESCUADRE') return;
+      const cliente = (f.cliente || '').toLowerCase();
+      const porClave = (qn.length >= 3 && k.includes(qn));
+      const porCliente = ql.length >= 3 && cliente.includes(ql);
+      const porImporte = qImp > 0 && Math.abs((f.importe || 0) - qImp) < 0.01;
+      if (porClave || porCliente || porImporte) hits.push({ m, k, f });
+    });
+  });
+  if (hits.length) {
+    out.innerHTML = '<div style="background:#e8f7ef;border:1px solid #a7d7b8;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12.5px">' +
+      '<b style="color:#1b7a3d">✓ Negociada — ' + hits.length + ' coincidencia(s) en remesas:</b>' +
+      hits.slice(0, 12).map(h =>
+        '<div style="margin-top:5px' + (h.f.situacion === 'devuelto' ? ';color:#c0392b;font-weight:700' : '') + '">· <b>' + h.k + '</b> ' +
+        (h.f.cliente || '') + ' · ' + bkFmt(h.f.importe || 0) +
+        (h.f.situacion === 'devuelto' ? ' ↩ DEVUELTO' : '') +
+        ' → remesa <b>' + (h.m.fecha || '') + '</b> ' + (h.m.banco || '') + ' de ' + bkFmt(h.m.importe) + '</div>').join('') +
+      (hits.length > 12 ? '<div style="color:#888;margin-top:4px">…y ' + (hits.length - 12) + ' más (afina la búsqueda)</div>' : '') +
+      '</div>';
+    return;
+  }
+  // No está en ninguna remesa: ¿cobrada por otra vía (transferencia)?
+  let otraVia = '';
+  if (bkCobradasBanco && bkCobradasBanco.detalle && bkCobradasBanco.detalle[qn]) {
+    otraVia = bkCobradasBanco.detalle[qn].map(d =>
+      '<div style="margin-top:5px">· conciliada con un movimiento del <b>' + (d.fecha || '') + '</b> (' + (d.banco || '') + '): ' +
+      (d.concepto || '').slice(0, 70) + '… · ' + bkFmt(d.importe) + '</div>').join('');
+  }
+  out.innerHTML = otraVia
+    ? '<div style="background:#fff4e0;border:1px solid #e8b27a;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12.5px">' +
+      '<b style="color:#b45309">⚠ No está en ninguna remesa, pero SÍ cobrada por otra vía:</b>' + otraVia + '</div>'
+    : '<div style="background:#fdf3f3;border:1px solid #e0b0b0;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12.5px">' +
+      '<b style="color:#c0392b">✗ "' + q.replace(/</g, '&lt;') + '" no aparece en ninguna remesa de las cargadas ni cobrada por otra vía</b><br>' +
+      '<span style="color:#888">Conclusión: NO se ha negociado (o su remesa no está importada — si es de un período antiguo, importa su N43 y el listado 📎).</span></div>';
 }
 
 // ✕ Quita UN solo recibo de un desglose, sin tocar el resto (cirugía, no demolición).
