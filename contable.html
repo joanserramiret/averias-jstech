@@ -3130,22 +3130,92 @@ async function remesaProponerCuadre(id) {
     sol = bkBuscarDesglose(pool, m.importe);
     if (sol && sol.length) { ventanaUsada = dias; break; }
   }
-  if (!sol || !sol.length) {
-    alert('No encuentro ninguna combinación de facturas-recibo que sume ' + bkFmt(m.importe) + ' exacto (probadas ventanas de 25, 45 y 90 días).\n' +
-      'Puede haber devoluciones incluidas en el neto, o algún cobro marcado con otro método de pago en Ágora (error humano).\n' +
-      'Para esta, mejor el listado del banco (📎) o ✓ cerrar sin desglose.');
-    return;
-  }
-  const lineas = sol.map(c => '· ' + c.clave + ' — ' + (c.cliente || '¿?') + ' — ' + bkFmt(c.importe) + ' (' + c.fecha + ')').join('\n');
-  if (!confirm('🧮 PROPUESTA de cuadre (' + sol.length + ' facturas, suma exacta ' + bkFmt(m.importe) + ' · ventana de ' + ventanaUsada + ' días):\n\n' + lineas +
-    '\n\n⚠ Es una reconstrucción plausible, NO verificada con el banco. ¿Los clientes te cuadran con esta remesa?\n\nAceptar = conciliar así · Cancelar = no tocar nada')) return;
+  // Pool MANUAL: todas las candidatas no conciliadas (incl. las marcadas "transferencia" en
+  // Ágora — el error humano PUEDE), recibos primero, ordenadas por cercanía a la remesa
+  const noRecibo = bkCandidatos({ importe: 1 }).filter(c =>
+    !c.recibo && !usadas.has(c.clave) && c.fecha && c.fecha <= m.fecha &&
+    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || ''));
+  const pool = todosRecibo.concat(noRecibo).sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+  remCuadre = { id: id, objetivo: m.importe, fecha: m.fecha, pool: pool, sel: {},
+                noRecibo: new Set(noRecibo.map(c => c.clave)) };
+  (sol || []).forEach(c => { remCuadre.sel[c.clave] = c; });
+  remCuadreAbrir(sol ? ventanaUsada : 0);
+}
+
+// Modal de cuadre manual de remesa: propuesta pre-marcada + selección libre con suma en vivo
+let remCuadre = null;
+function remCuadreAbrir(ventana) {
+  const viejo = document.getElementById('remc-modal');
+  if (viejo) viejo.remove();
+  const div = document.createElement('div');
+  div.id = 'remc-modal';
+  div.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(15,31,92,.5);display:flex;align-items:center;justify-content:center';
+  div.innerHTML = '<div style="background:#fff;border-radius:14px;padding:20px;width:640px;max-width:95vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(0,0,0,.3)">' +
+    '<div style="font-weight:800;font-size:15px;color:#1a2e6e">🧮 Cuadre de remesa · ' + remCuadre.fecha + ' · objetivo ' + bkFmt(remCuadre.objetivo) + '</div>' +
+    '<div style="font-size:11.5px;color:#888;margin:4px 0 8px">' + (ventana
+      ? 'Propuesta automática pre-marcada (ventana de ' + ventana + ' días) — revisa, añade o quita lo que haga falta.'
+      : 'Sin propuesta automática que cuadre — selecciona a mano las facturas de la remesa.') +
+      ' Las ⚠ figuran como "transferencia" en Ágora (posible error de método).</div>' +
+    '<div id="remc-suma" style="font-size:13px;font-weight:700;padding:8px 12px;border-radius:8px;margin-bottom:8px"></div>' +
+    '<input id="remc-buscar" placeholder="🔍 Filtrar por cliente o número..." oninput="remCuadreRender()" style="padding:8px 10px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-bottom:8px;font-family:inherit"/>' +
+    '<div id="remc-lista" style="flex:1;overflow:auto;border:1px solid #eee;border-radius:8px"></div>' +
+    '<div style="display:flex;gap:8px;margin-top:12px">' +
+      '<button onclick="remCuadreGuardar()" style="flex:1;padding:10px;background:#1a2e6e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✓ Conciliar selección</button>' +
+      '<button onclick="document.getElementById(\'remc-modal\').remove()" style="padding:10px 16px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;font-size:13px;cursor:pointer">Cancelar</button>' +
+    '</div></div>';
+  div.onclick = e => { if (e.target === div) div.remove(); };
+  document.body.appendChild(div);
+  remCuadreRender();
+}
+
+function remCuadreToggle(clave) {
+  const c = remCuadre.pool.find(x => x.clave === clave);
+  if (!c) return;
+  if (remCuadre.sel[clave]) delete remCuadre.sel[clave]; else remCuadre.sel[clave] = c;
+  remCuadreRender();
+}
+
+function remCuadreRender() {
+  const q = (document.getElementById('remc-buscar').value || '').toLowerCase();
+  const suma = Object.values(remCuadre.sel).reduce((s, c) => s + c.importe, 0);
+  const dif = remCuadre.objetivo - suma;
+  const cuadra = Math.abs(dif) < 0.01;
+  const sumaEl = document.getElementById('remc-suma');
+  sumaEl.style.background = cuadra ? '#e8f7ef' : '#fff4e0';
+  sumaEl.style.color = cuadra ? '#1b7a3d' : '#c96a10';
+  sumaEl.textContent = Object.keys(remCuadre.sel).length + ' seleccionadas · suman ' + bkFmt(suma) +
+    (cuadra ? ' — ✓ CUADRA EXACTO' : ' — faltan ' + bkFmt(dif));
+  let lista = remCuadre.pool;
+  if (q) lista = lista.filter(c => c.clave.toLowerCase().includes(q) || (c.cliente || '').toLowerCase().includes(q));
+  document.getElementById('remc-lista').innerHTML = lista.slice(0, 250).map(c => {
+    const sel = !!remCuadre.sel[c.clave];
+    const esTransfer = remCuadre.noRecibo.has(c.clave);
+    return '<label style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #f3f3f3;cursor:pointer;background:' + (sel ? '#eef4ff' : '#fff') + '">' +
+      '<input type="checkbox" ' + (sel ? 'checked' : '') + ' onchange="remCuadreToggle(\'' + c.clave.replace(/'/g, "\\'") + '\')" style="width:auto"/>' +
+      '<span style="flex:1;font-size:12.5px"><b>' + c.clave + '</b> · ' + c.fecha +
+      (esTransfer ? ' <span style="color:#c96a10;font-size:10.5px">⚠ transferencia en Ágora</span>' : '') +
+      '<br><span style="color:#888">' + (c.cliente || '') + '</span></span>' +
+      '<b style="font-size:12.5px">' + bkFmt(c.importe) + '</b></label>';
+  }).join('') || '<div style="padding:14px;font-size:13px;color:#888">Nada que coincida.</div>';
+}
+
+async function remCuadreGuardar() {
+  const seles = Object.values(remCuadre.sel);
+  if (!seles.length) { alert('Marca al menos una factura.'); return; }
+  const suma = seles.reduce((s, c) => s + c.importe, 0);
+  if (Math.abs(suma - remCuadre.objetivo) >= 0.01 &&
+      !confirm('La selección suma ' + bkFmt(suma) + ' y la remesa es de ' + bkFmt(remCuadre.objetivo) + ' — NO cuadra exacto.\n¿Conciliar igualmente?')) return;
   try {
-    const r2 = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+    const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-      body: JSON.stringify({ id: id, facturas: sol.map(c => ({ serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente, situacion: 'abonado', origen: 'propuesta' })) })
+      body: JSON.stringify({ id: remCuadre.id, facturas: seles.map(c => ({ serie: c.serie, numero: c.numero,
+        importe: c.importe, cliente: c.cliente, situacion: 'abonado', origen: 'propuesta' })) })
     });
-    if ((await r2.json()).ok) bkRemesas(); else alert('✗ No se pudo guardar');
+    if ((await r.json()).ok) {
+      document.getElementById('remc-modal').remove();
+      bkRemesas();
+    } else alert('✗ No se pudo guardar');
   } catch(e) { alert('✗ ' + e.message); }
 }
 
