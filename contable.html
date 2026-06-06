@@ -1053,6 +1053,33 @@ function irAFacturas(estado) {
   if (typeof filtrarFacturasC === 'function') filtrarFacturasC();
 }
 
+// ⚖ ANULACIONES INTERNAS: una devolución (FD/TD/D...) con una factura hermana de importe
+// exacto contrario (mismo cliente si lo hay) es un fallo humano corregido — se matan entre
+// ellas y AMBAS salen del flujo de cobro. Solo las devoluciones SIN hermana son naturales.
+let fcAnuladas = new Set();
+function calcularAnuladas() {
+  fcAnuladas = new Set();
+  const facts = todasFacturasC.filter(f => f._tipo === 'factura' && f.Totals);
+  const pos = facts.filter(f => f.Totals.GrossAmount > 0);
+  const neg = facts.filter(f => f.Totals.GrossAmount < 0);
+  const usadas = new Set();
+  neg.forEach(d => {
+    const objetivo = -d.Totals.GrossAmount;
+    const cliD = (d.Customer && (d.Customer.Cif || d.Customer.BusinessName || '')) || '';
+    const hermana = pos.find(f => {
+      if (usadas.has(f)) return false;
+      if (Math.abs(f.Totals.GrossAmount - objetivo) > 0.005) return false;
+      const cliF = (f.Customer && (f.Customer.Cif || f.Customer.BusinessName || '')) || '';
+      return !cliD || !cliF || cliD === cliF;  // mismo cliente si ambos lo tienen
+    });
+    if (hermana) {
+      usadas.add(hermana);
+      fcAnuladas.add((hermana.Serie + '-' + hermana.Number).toUpperCase());
+      fcAnuladas.add((d.Serie + '-' + d.Number).toUpperCase());
+    }
+  });
+}
+
 // Facturas cobradas según el BANCO: conciliadas en movimientos (y las devueltas, que vuelven a pendiente)
 let bkCobradasBanco = null;
 async function cargarCobradasBanco() {
@@ -1071,6 +1098,15 @@ async function cargarCobradasBanco() {
   } catch(e) { bkCobradasBanco = { cobradas: new Set(), devueltas: new Set(), sinBanco: true }; }
 }
 
+// Tras conciliar/desconciliar: recarga la verdad bancaria y repinta todas las vistas afectadas,
+// para que el estado Pendiente→Pagada cambie EN VIVO sin recargar la página.
+async function refrescarEstadosCobro() {
+  await cargarCobradasBanco();
+  try { actualizarDashboard(); } catch(e) {}
+  try { filtrarFacturasC(); } catch(e) {}
+  try { actualizarCobros(); } catch(e) {}
+}
+
 // ¿Es este cargo una devolución de recibo de CLIENTE? (no un pago a proveedor)
 function bkEsDevolCliente(m) {
   return !!(m && m.importe < 0 && /DEVOL|DEVUELT|IMPAGAD/i.test(m.concepto || '') &&
@@ -1080,6 +1116,7 @@ function bkEsDevolCliente(m) {
 function actualizarDashboard() {
   // La verdad bancaria se carga una vez y se repinta al llegar
   if (bkCobradasBanco === null) { bkCobradasBanco = 'cargando'; cargarCobradasBanco().then(actualizarDashboard); }
+  calcularAnuladas();
   const banco = (bkCobradasBanco && bkCobradasBanco.cobradas) ? bkCobradasBanco : null;
 
   const hoy = new Date();
@@ -1097,12 +1134,13 @@ function actualizarDashboard() {
 
     // FACTURADO NETO: ventas menos devoluciones. Las devoluciones (FD, D...) vienen con importe
     // NEGATIVO y deben RESTAR del facturado (antes se excluían y por eso mentía).
+    const anulada = fcAnuladas.has((f.Serie + '-' + f.Number).toUpperCase());
     totalAnio += t;
     if (mesF === mesActual) totalMes += t;
-    if (t > 0) { nAnio++; if (mesF === mesActual) nMes++; }  // contar solo ventas, no devoluciones
+    if (t > 0 && !anulada) { nAnio++; if (mesF === mesActual) nMes++; }  // ni devoluciones ni anuladas
 
-    // COBROS / PENDIENTES: solo sobre ventas reales (positivas); las devoluciones no se "cobran"
-    if (t <= 0) return;
+    // COBROS / PENDIENTES: solo ventas reales vivas; anuladas y devoluciones fuera
+    if (t <= 0 || anulada) return;
 
     const pagos = f.Payments || [];
     const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
@@ -1184,25 +1222,84 @@ function filtrarFacturasC() {
     const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
     // Misma verdad bancaria que el dashboard, para que los números cuadren entre vistas
     const bancoF = (bkCobradasBanco && bkCobradasBanco.cobradas) ? bkCobradasBanco : null;
+    const clave = (f.Serie + '-' + f.Number).toUpperCase();
     let esPagada;
     if (bancoF) {
-      const clave = (f.Serie + '-' + f.Number).toUpperCase();
       esPagada = bancoF.cobradas.has(clave);  // un cobro válido posterior mata la devolución
     } else {
       esPagada = sumPagos >= t - 0.01 || (f.Status && (f.Status === 'Closed' || f.Status === 'Processed' || f.Status.toLowerCase().includes('paid')));
     }
     const dias = (hoy - new Date(f.Date)) / 86400000;
     const esVencida = !esPagada && dias > 30;
+    const anulada = fcAnuladas.has(clave) || t <= 0;  // anuladas y devoluciones: fuera de los filtros de cobro
 
     let matchEstado = true;
-    if (estado === 'pagada') matchEstado = esPagada;
-    else if (estado === 'pendiente') matchEstado = !esPagada && !esVencida;
-    else if (estado === 'vencida') matchEstado = esVencida;
+    if (estado === 'pagada') matchEstado = esPagada && !anulada;
+    else if (estado === 'pendiente') matchEstado = !anulada && !esPagada && !esVencida;
+    else if (estado === 'vencida') matchEstado = !anulada && esVencida;
 
     return matchQ && matchEstado;
   });
 
   renderTablaFacturas();
+}
+
+// 🔗 Conciliar DESDE la factura: busca en el banco los abonos pendientes que cuadran
+// (importe exacto o nombre del cliente en el concepto) y concilia con un clic
+async function conciliarDesdeFactura(idx) {
+  const f = facturasFiltC[idx];
+  if (!f || !f.Totals) return;
+  const t = f.Totals.GrossAmount;
+  const cliente = f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '';
+  const num = f.Serie + '-' + f.Number;
+  let movs = [];
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/movimientos?estado=pendiente', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    movs = (await r.json()).movimientos || [];
+  } catch(e) { alert('✗ Error consultando el banco: ' + e.message); return; }
+
+  const porImporte = movs.filter(m => m.importe > 0 && Math.abs(m.importe - t) < 0.01);
+  const porNombre = movs.filter(m => m.importe > 0 && !porImporte.includes(m) && cliente && bkNombreEnConcepto(cliente, m.concepto));
+  const cands = porImporte.concat(porNombre).slice(0, 12);
+  if (!cands.length) {
+    alert('🔗 ' + num + ' (' + t.toFixed(2) + '€ · ' + cliente + ')\n\nNo encuentro ningún abono pendiente que cuadre por importe ni por nombre.\n\n' +
+      'Lo más probable: se cobró dentro de una REMESA aún sin desglosar → pestaña Remesas → 📎 sube el listado del banco.');
+    return;
+  }
+  const viejo = document.getElementById('cdf-modal');
+  if (viejo) viejo.remove();
+  const div = document.createElement('div');
+  div.id = 'cdf-modal';
+  div.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(15,31,92,.5);display:flex;align-items:center;justify-content:center';
+  div.innerHTML = '<div style="background:#fff;border-radius:14px;padding:22px;width:600px;max-width:94vw;max-height:85vh;overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.3)">' +
+    '<div style="font-weight:800;font-size:15px;color:#1a2e6e;margin-bottom:4px">🔗 ¿Con qué cobro caso la ' + num + '?</div>' +
+    '<div style="font-size:12px;color:#888;margin-bottom:12px">' + cliente + ' · <b>' + t.toFixed(2) + '€</b> — abonos pendientes que cuadran (' +
+      porImporte.length + ' por importe, ' + porNombre.length + ' por nombre):</div>' +
+    cands.map(m =>
+      '<div style="display:flex;gap:10px;align-items:center;border:1px solid #e4e8f3;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:12.5px">' +
+      '<div style="flex:1"><b>' + m.fecha + '</b> · ' + (m.banco || '') + '<br><span style="color:#666">' + (m.concepto || '').slice(0, 80) + '</span></div>' +
+      '<b style="color:' + (Math.abs(m.importe - t) < 0.01 ? '#1a7a3f' : '#c96a10') + '">' + bkFmt(m.importe) + '</b>' +
+      '<button onclick="cdfConciliar(' + m.id + ',' + idx + ')" style="padding:6px 12px;background:#1a2e6e;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">Conciliar</button></div>').join('') +
+    '<button onclick="document.getElementById(\'cdf-modal\').remove()" style="margin-top:8px;width:100%;padding:8px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;font-size:13px;cursor:pointer">Cancelar</button></div>';
+  div.onclick = e => { if (e.target === div) div.remove(); };
+  document.body.appendChild(div);
+}
+
+async function cdfConciliar(movId, idx) {
+  const f = facturasFiltC[idx];
+  if (!f) return;
+  const modal = document.getElementById('cdf-modal');
+  if (modal) modal.remove();
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: movId, facturas: [{ serie: f.Serie, numero: f.Number,
+        importe: f.Totals.GrossAmount, cliente: f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '' }] })
+    });
+    if ((await r.json()).ok) { await refrescarEstadosCobro(); }
+    else alert('✗ No se pudo conciliar');
+  } catch(e) { alert('✗ ' + e.message); }
 }
 
 // ✉ Reclamación de cobro: con las facturas seleccionadas de UN cliente, genera un email editable
@@ -1303,8 +1400,11 @@ function renderTablaFacturas() {
     }
     const dias = Math.floor((hoy - new Date(f.Date)) / 86400000);
     const esVencida = !esPagada && dias > 30;
-    const badge = t <= 0
-      ? '<span class="badge" style="background:#eee;color:#666">Devolución</span>'
+    const anuladaT = fcAnuladas.has(claveT);
+    const badge = anuladaT
+      ? '<span class="badge" style="background:#eee;color:#666" title="Se anula con su factura/devolución hermana de importe contrario (fallo humano corregido)">⚖ Anulada</span>'
+      : t <= 0
+      ? '<span class="badge" style="background:#fde8e8;color:#c0392b">Devolución</span>'
       : esPagada
         ? '<span class="badge badge-pagada">Pagada</span>'
         : esDevuelta
@@ -1325,6 +1425,7 @@ function renderTablaFacturas() {
       '<td style="font-size:12px">' + metodoPago + '</td>' +
       '<td>' + badge + '</td>' +
       '<td><div style="display:flex;gap:6px">' +
+        (!esPagada && !anuladaT && t > 0 ? '<button onclick="conciliarDesdeFactura(' + i + ')" title="Buscar en el banco el cobro de esta factura y conciliarla" style="padding:5px 10px;background:#e87e1a;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700">🔗</button>' : '') +
         '<button onclick="previsualizarFacturaC(' + i + ')" style="padding:5px 10px;background:var(--fondo);border:1.5px solid var(--borde);border-radius:5px;cursor:pointer;font-size:12px">🖨 Ver</button>' +
         '<button onclick="descargarFactura(' + i + ')" style="padding:5px 10px;background:var(--azul);color:white;border:none;border-radius:5px;cursor:pointer;font-size:12px">⬇</button>' +
       '</div></td>' +
@@ -1727,11 +1828,12 @@ function actualizarCobros() {
 
   // Pendientes
   const banco = (bkCobradasBanco && bkCobradasBanco.cobradas) ? bkCobradasBanco : null;
+  calcularAnuladas();
   const pendientes = todasFacturasC.filter(f => {
     if (f._tipo !== 'factura') return false;
-    const serie = f.Serie || '';
-    if (serie === 'FD' || serie === 'APPFD') return false;
     const t = f.Totals ? f.Totals.GrossAmount : 0;
+    if (t <= 0) return false;  // devoluciones: no se cobran
+    if (fcAnuladas.has((f.Serie + '-' + f.Number).toUpperCase())) return false;  // anuladas con su hermana
     const pagos = f.Payments || [];
     const sumPagos = pagos.reduce((s,p) => s + Math.abs(p.Amount||p.PaidAmount||0), 0);
     if (banco) {
@@ -2246,8 +2348,9 @@ async function bkCargar() {
     }
     if (!Object.keys(pvDatos).length) pvCargarDatos(new Date().getFullYear());
     bkRender();
+    refrescarEstadosCobro();  // estado Pendiente→Pagada en vivo en todas las pestañas
   } catch(e) {
-    listEl.innerHTML = '<div style="color:#c0392b;font-size:13px">Error cargando movimientos: ' + e.message + '<br><small>¿Está el bridge actualizado y arrancado?</small></div>';
+    listEl.innerHTML = '<div style="color:#c0392b;font-size:13px">Error cargando movimientos: ' + e.message + '<br><small>¿Estáel bridge actualizado y arrancado?</small></div>';
   }
 }
 
@@ -2878,6 +2981,7 @@ async function bkRemesas() {
     }
   }
   el.innerHTML = html;
+  refrescarEstadosCobro();  // importar/deshacer desgloses cambia estados de facturas en vivo
 }
 
 function exportarRemesas() {

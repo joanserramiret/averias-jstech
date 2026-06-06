@@ -45,8 +45,8 @@
   <tr><th>Pestaña</th><th>Qué es</th></tr>
   <tr><td><b>📊 Resumen</b></td><td>Foto del día: saldos bancarios reales, ventas, cobros y desglose por método de pago.</td></tr>
   <tr><td><b>📊 Resumen</b></td><td>Foto del día: facturado del mes + acumulado del año, cobrado real (según el banco), pendiente y vencido. <b>Las tarjetas son clicables</b> y llevan a su relación.</td></tr>
-  <tr><td><b>🧾 Facturas emitidas</b></td><td>Todas las facturas de venta de Ágora. <b>Al entrar se carga solo el año en curso entero</b> (tarda unos segundos; solo la primera vez del histórico tarda unos minutos). El botón <span class="btn">Cargar</span> sirve para otros períodos. Desde aquí se suben los PDF y el resumen diario a CAJAS.</td></tr>
-  <tr><td><b>💶 Cartera de cobros</b></td><td>Facturas emitidas pendientes de cobro, ordenadas por antigüedad.</td></tr>
+  <tr><td><b>🧾 Facturas emitidas</b></td><td>Todas las facturas de venta de Ágora. <b>Al entrar se carga solo el año en curso entero</b>. Cada factura muestra su estado real: <span class="ok">Pagada</span> (casada con el banco), <span class="ambar">Pendiente · días</span>, <span class="rojo">Vencida</span>, <span class="rojo">↩ Recibo devuelto</span> o ⚖ Anulada (se mata con su devolución hermana — fallo corregido). Desde aquí se suben los PDF y el resumen diario a CAJAS.</td></tr>
+  <tr><td><b>💶 Cartera de cobros</b></td><td>Seguimiento de pendientes: antigüedad de saldos (0-30/31-60/61-90/+90 días) y agrupado por cliente, el que más debe arriba. Los recibos devueltos, marcados en rojo.</td></tr>
   <tr><td><b>📥 Facturas recibidas</b></td><td>Las facturas de proveedor del Dropbox (0 PROVEÏDORS), con importes leídos automáticamente, detección de duplicados y albaranes sin factura.</td></tr>
   <tr><td><b>🏦 Tesorería</b></td><td>Movimientos de Bankinter y Sabadell con conciliación. Filtra por banco o estado, ordena clicando las cabeceras y busca cualquier cosa (importe, cliente, factura, concepto).</td></tr>
   <tr><td><b>🧩 Remesas y efectos</b></td><td>Cada remesa con su desglose recibo a recibo, devoluciones marcadas y exportación a Excel.</td></tr>
@@ -64,6 +64,15 @@
 <div class="aviso">
   <b>El objetivo es el «cuadre», no conciliarlo todo.</b> El KPI <span class="btn">🎯 Cuadre del banco</span> mide el % de movimientos <i>explicados</i>: los cobros/pagos casan con facturas; nóminas, impuestos, comisiones, Seg. Social y traspasos se <b>categorizan</b> (su justificante no es factura) y salen de pendientes. Filtra por banco, ordena clicando las cabeceras y busca cualquier cosa (importe, cliente, factura…).<br><br>
   <b>🧹 Duplicados</b> → si un apunte entró por el extracto N43 y por el banco a la vez, este botón quita el sobrante conservando el que ya esté trabajado.
+</div>
+
+<h2>💶 El ciclo del cobro (lo más importante)</h2>
+<div class="card">
+  <p style="margin-top:0"><b>Una factura solo cuenta como COBRADA si está casada con el banco</b>: conciliada con una transferencia o dentro de una remesa desglosada. Son las dos únicas formas de cobro de la empresa — nada de fiarse del "pagada" optimista del TPV.</p>
+  <div class="paso"><b class="n">1</b><div>Facturas emitidas → filtro <span class="btn">Pendientes</span>: cada una con sus días sin cobrar.</div></div>
+  <div class="paso"><b class="n">2</b><div>Botón <span class="btn">🔗</span> de la fila → busca en el banco los abonos que cuadran (por importe o por nombre) → un clic y conciliada. Si no hay candidato, suele estar en una remesa sin desglosar (📎).</div></div>
+  <div class="paso"><b class="n">3</b><div>Recibo devuelto: la factura vuelve a pendiente (<span class="rojo">↩</span>), el cargo de devolución se concilia contra esa misma factura, y cuando llegue el <b>nuevo cobro total</b>, se concilia y la "mata" — pasa a Pagada.</div></div>
+  <div class="paso"><b class="n">4</b><div>Para reclamar: marca las facturas pendientes de un cliente → <span class="btn">✉ Reclamar cobro</span> → email editable con la lista, los días y el total → "Abrir en tu correo" y enviar.</div></div>
 </div>
 
 <h2>🧩 Remesas: la fuente de la verdad es el banco</h2>
