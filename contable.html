@@ -2316,20 +2316,32 @@ function actualizarCobros() {
     el.innerHTML = '<div style="color:var(--verde);font-size:13px;font-weight:600">✓ No hay facturas pendientes de cobro.</div>';
     return;
   }
+  // Destinos manuales (girar↔perseguir) guardados en el bridge: se cargan una vez
+  if (carteraDestinos === null) { carteraDestinos = {}; cargarCarteraDestinos().then(actualizarCobros); }
+
   const buckets = { '0-30': [0, 0], '31-60': [0, 0], '61-90': [0, 0], '+90': [0, 0] };
-  const porCliente = {};
+  // DOS CARTERAS por método de pago (el ajuste manual prevalece):
+  // 🧲 GIRAR = cobradas "por Recibo" en Ágora que no se negociaron → montar SEPA
+  // 🏃 PERSEGUIR = impagos (recibos devueltos) y transferencias que no llegan → reclamar
+  const cols = { girar: {}, perseguir: {} };
+  carteraFacts = {};
   pendientes.forEach(f => {
     const t = f.Totals ? f.Totals.GrossAmount : 0;
     const dias = Math.floor((hoy - new Date(f.Date)) / 86400000);
     const b = dias <= 30 ? '0-30' : dias <= 60 ? '31-60' : dias <= 90 ? '61-90' : '+90';
     buckets[b][0]++; buckets[b][1] += t;
     const cli = f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '(sin nombre)') : '(sin nombre)';
-    const g = porCliente[cli] = porCliente[cli] || { total: 0, maxDias: 0, facts: [] };
+    const clave = bkNormClave(f.Serie + '-' + f.Number);
+    const devuelta = !!(banco && banco.devueltas.has(clave));
+    const recibo = (f.Payments || []).some(p => String(p.MethodName || '').toLowerCase().includes('recibo'));
+    const destino = carteraDestinos[clave] || (devuelta ? 'perseguir' : (recibo ? 'girar' : 'perseguir'));
+    carteraFacts[clave] = { destino: destino };
+    const g = cols[destino][cli] = cols[destino][cli] || { total: 0, maxDias: 0, facts: [], claves: [] };
     g.total += t;
     g.maxDias = Math.max(g.maxDias, dias);
-    const clave = bkNormClave(f.Serie + '-' + f.Number);
-    g.facts.push({ num: f.Serie + '-' + f.Number, fecha: (f.Date || '').slice(0, 10), total: t, dias: dias,
-                   devuelta: !!(banco && banco.devueltas.has(clave)) });
+    g.claves.push(clave);
+    g.facts.push({ num: f.Serie + '-' + f.Number, clave: clave, fecha: (f.Date || '').slice(0, 10),
+                   total: t, dias: dias, devuelta: devuelta, recibo: recibo });
   });
   const colB = { '0-30': '#1a7a3f', '31-60': '#c96a10', '61-90': '#c0392b', '+90': '#7b241c' };
   let html = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">' +
@@ -2339,22 +2351,79 @@ function actualizarCobros() {
       '<div style="font-weight:800;font-size:15px;color:' + colB[b] + '">' + s.toFixed(2) + '€</div>' +
       '<div style="font-size:11px;color:var(--texto-suave)">' + n + ' fra.</div></div>').join('') + '</div>';
 
-  html += Object.entries(porCliente).sort((a, b) => b[1].total - a[1].total).map(([cli, g]) => {
-    const colorCli = g.maxDias > 60 ? 'var(--rojo)' : g.maxDias > 30 ? '#c96a10' : 'var(--azul)';
-    return '<details style="border:1px solid var(--borde);border-radius:8px;padding:7px 12px;margin-bottom:6px">' +
-      '<summary style="cursor:pointer;display:flex;gap:10px;align-items:center;font-size:13px">' +
-      '<b style="color:' + colorCli + ';flex:1">' + cli + '</b>' +
-      '<span style="color:var(--texto-suave);font-size:11px">' + g.facts.length + ' fra. · hasta ' + g.maxDias + 'd</span>' +
-      '<b>' + g.total.toFixed(2) + '€</b></summary>' +
-      g.facts.sort((a, b) => b.dias - a.dias).map(x =>
-        '<div style="display:flex;justify-content:space-between;padding:5px 0 5px 12px;border-bottom:1px solid #f3f3f3;font-size:12.5px">' +
-        '<span><b style="color:var(--azul)">' + x.num + '</b> · ' + x.fecha +
-        (x.devuelta ? ' <span style="color:#c0392b;font-weight:700">↩ RECIBO DEVUELTO</span>' : '') + '</span>' +
-        '<span style="display:flex;gap:10px"><b>' + x.total.toFixed(2) + '€</b>' +
-        '<span style="color:' + (x.dias > 30 ? 'var(--rojo)' : 'var(--texto-suave)') + ';font-size:11px">' + x.dias + 'd</span></span></div>').join('') +
-      '</details>';
-  }).join('');
+  carteraGruposIdx = [];
+  const pintaColumna = (destino, titulo, sub, color) => {
+    const grupos = Object.entries(cols[destino]).sort((a, b) => b[1].total - a[1].total);
+    const tot = grupos.reduce((s, [, g]) => s + g.total, 0);
+    const nf = grupos.reduce((s, [, g]) => s + g.facts.length, 0);
+    const otro = destino === 'girar' ? 'perseguir' : 'girar';
+    const etqOtro = destino === 'girar' ? '🏃 a perseguir' : '🧲 a girar';
+    let h = '<div style="background:#fff;border:2px solid ' + color + ';border-radius:12px;padding:10px 12px">' +
+      '<div style="font-weight:800;font-size:13px;color:' + color + ';margin-bottom:2px">' + titulo + ' — ' + bkFmt(tot) + ' · ' + nf + ' fra.</div>' +
+      '<div style="font-size:11px;color:var(--texto-suave);margin-bottom:8px">' + sub + '</div>';
+    if (!grupos.length) h += '<div style="font-size:12px;color:var(--texto-suave)">Nada por aquí ✓</div>';
+    h += grupos.map(([cli, g]) => {
+      const gi = carteraGruposIdx.push({ claves: g.claves.slice(), destino: otro }) - 1;
+      const colorCli = g.maxDias > 60 ? 'var(--rojo)' : g.maxDias > 30 ? '#c96a10' : 'var(--azul)';
+      return '<details style="border:1px solid var(--borde);border-radius:8px;padding:7px 10px;margin-bottom:6px">' +
+        '<summary style="cursor:pointer;display:flex;gap:8px;align-items:center;font-size:12.5px">' +
+        '<b style="color:' + colorCli + ';flex:1">' + cli + '</b>' +
+        '<span style="color:var(--texto-suave);font-size:11px">' + g.facts.length + ' fra. · hasta ' + g.maxDias + 'd</span>' +
+        '<b>' + g.total.toFixed(2) + '€</b>' +
+        '<button onclick="event.preventDefault();carteraMoverGrupo(' + gi + ')" title="Mover TODAS las facturas de este cliente a la otra columna (se recuerda)" style="padding:2px 8px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:6px;font-size:10.5px;font-weight:700;cursor:pointer">⇄ ' + etqOtro + '</button></summary>' +
+        g.facts.sort((a, b) => b.dias - a.dias).map(x =>
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0 5px 10px;border-bottom:1px solid #f3f3f3;font-size:12px">' +
+          '<span style="flex:1"><b style="color:var(--azul)">' + x.num + '</b> · ' + x.fecha +
+          (x.devuelta ? ' <span style="color:#c0392b;font-weight:700">↩ DEVUELTO</span>' : '') +
+          (!x.recibo && destino === 'girar' ? ' <span style="color:#888;font-size:10px">(era transferencia)</span>' : '') + '</span>' +
+          '<b>' + x.total.toFixed(2) + '€</b>' +
+          '<span style="color:' + (x.dias > 30 ? 'var(--rojo)' : 'var(--texto-suave)') + ';font-size:11px;width:32px;text-align:right">' + x.dias + 'd</span>' +
+          '<button onclick="carteraMoverUna(\'' + x.clave + '\')" title="Mover SOLO esta factura a la otra columna (se recuerda)" style="padding:1px 7px;background:#f0f4fb;border:1px solid #c0cbea;border-radius:5px;font-size:10.5px;cursor:pointer">⇄</button></div>').join('') +
+        '</details>';
+    }).join('');
+    return h + '</div>';
+  };
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">' +
+    pintaColumna('girar', '🧲 PARA GIRAR (SEPA pendiente)', 'Cobradas "por Recibo" en Ágora sin negociar, o que el cliente pide re-girar — material para la próxima remesa.', '#1a7a3f') +
+    pintaColumna('perseguir', '🏃 A PERSEGUIR (impagos y transferencias)', 'Recibos devueltos y transferencias que no llegan — a reclamar (✉ desde Facturas emitidas).', '#c0392b') +
+    '</div>';
   el.innerHTML = html;
+}
+
+// ── Movimiento entre columnas de la cartera (se guarda en el bridge y prevalece) ──
+let carteraDestinos = null;   // clave → 'girar' | 'perseguir' (ajustes manuales)
+let carteraFacts = {};        // último render: clave → { destino }
+let carteraGruposIdx = [];    // grupos por cliente del último render (para mover en bloque)
+
+async function cargarCarteraDestinos() {
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/cartera/destinos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    carteraDestinos = (await r.json()).destinos || {};
+  } catch(e) { carteraDestinos = {}; }
+}
+
+async function carteraMover(claves, destino) {
+  try {
+    await fetch(BRIDGE_URL_C + '/cartera/destino', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ claves: claves, destino: destino })
+    });
+    claves.forEach(k => { carteraDestinos[k] = destino; });
+    actualizarCobros();
+  } catch(e) { alert('✗ ' + e.message); }
+}
+
+function carteraMoverUna(clave) {
+  const f = carteraFacts[clave];
+  if (!f) return;
+  carteraMover([clave], f.destino === 'girar' ? 'perseguir' : 'girar');
+}
+
+function carteraMoverGrupo(gi) {
+  const g = carteraGruposIdx[gi];
+  if (!g) return;
+  carteraMover(g.claves, g.destino);
 }
 
 // ===== IVA TAB =====
