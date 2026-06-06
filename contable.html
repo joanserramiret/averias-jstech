@@ -930,7 +930,8 @@ function setPeriod(type, evt) {
   const hoy = new Date();
   const y = hoy.getFullYear();
   let desde, hasta;
-  const fmt = d => d.toISOString().split('T')[0];
+  // Fecha LOCAL (no toISOString, que pasa a UTC y resta un día: 01/01 → 31/12 del año anterior)
+  const fmt = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   document.querySelectorAll('.shortcut-btn').forEach(b => b.classList.remove('active'));
 
   if (type === 'month') {
