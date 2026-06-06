@@ -3039,9 +3039,10 @@ async function bkRemesas() {
         : '<span style="color:#c0392b;font-weight:700">⏳ sin desglosar</span>';
       const detalle = facts.length
         ? '<table style="width:100%;font-size:12px;margin-top:6px"><tr style="color:var(--texto-suave)"><th style="text-align:left">Factura</th><th style="text-align:left">Cliente</th><th style="text-align:right">Importe</th></tr>' +
-          facts.map(f => {
+          facts.map((f, fi) => {
             const dev = f.situacion === 'devuelto';
-            const fra = f.serie === '—' ? '<i style="color:#c96a10">sin factura localizada</i>'
+            const fra = f.serie === '—'
+                      ? '<i style="color:#c96a10">sin factura localizada</i> <button onclick="remesaAsignarManual(' + m.id + ',' + fi + ')" title="Asignar la(s) factura(s) a mano desde el listado" style="padding:2px 8px;background:#1a2e6e;color:#fff;border:none;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer">✎ Asignar</button>'
                       : f.serie === 'REF' ? '<b>' + f.numero + '</b>'
                       : '<b>' + f.serie + '-' + f.numero + '</b>';
             return '<tr' + (dev ? ' style="color:#c0392b;font-weight:700"' : '') + '><td>' + fra + '</td><td>' +
@@ -3380,6 +3381,143 @@ async function remCuadreGuardar() {
     });
     if ((await r.json()).ok) {
       document.getElementById('remc-modal').remove();
+      bkRemesas();
+    } else alert('✗ No se pudo guardar');
+  } catch(e) { alert('✗ ' + e.message); }
+}
+
+// ✎ Asignación MANUAL: cuando tú tienes la certeza y el número, eliges del listado la(s)
+// factura(s) de un recibo "sin factura localizada" — el ponteo manda sobre todo lo demás
+let remAsig = null;
+async function remesaAsignarManual(movId, fi) {
+  const m = (bkRemesasDatos.remesas || []).find(x => x.id === movId);
+  if (!m || !m.conciliado || !m.conciliado[fi]) return;
+  const entrada = m.conciliado[fi];
+  // Mapa de imputaciones existentes (clave → dónde está) — NO excluimos nada del pool:
+  // LA VERDAD MANUAL PREVALECE sobre cualquier suposición previa de la app
+  const imputadas = {};
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    ((await r.json()).movimientos || []).forEach(x => bkClavesDeConciliado(x.conciliado).forEach(([k]) => {
+      if (!imputadas[k]) imputadas[k] = { movId: x.id, fecha: x.fecha, concepto: (x.concepto || '').slice(0, 45) };
+    }));
+  } catch(e) { alert('✗ ' + e.message); return; }
+  // Pool SIN LÍMITE: todas las facturas de venta cargadas (solo fuera tickets/devoluciones
+  // y las que ya están en ESTE mismo desglose, que sería duplicarlas)
+  const enEsta = new Set(bkClavesDeConciliado(m.conciliado).map(([k]) => k));
+  const pool = bkCandidatos({ importe: 1 }).filter(c =>
+    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || '') && !enEsta.has(bkNormClave(c.clave)));
+  if (!pool.length) { alert('No hay facturas disponibles — ¿has cargado el período en Facturas emitidas?'); return; }
+  remAsig = { movId: movId, fi: fi, objetivo: entrada.importe || 0, cliente: entrada.cliente || '',
+              situacion: entrada.situacion || 'abonado', pool: pool, sel: {}, imputadas: imputadas };
+  const viejo = document.getElementById('rasig-modal');
+  if (viejo) viejo.remove();
+  const div = document.createElement('div');
+  div.id = 'rasig-modal';
+  div.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(15,31,92,.55);display:flex;align-items:center;justify-content:center';
+  div.innerHTML = '<div style="background:#fff;border-radius:14px;padding:20px;width:620px;max-width:95vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(0,0,0,.3)">' +
+    '<div style="font-weight:800;font-size:15px;color:#1a2e6e">✎ Asignar factura(s) al recibo de ' + (remAsig.cliente || '¿?') + ' · ' + bkFmt(remAsig.objetivo) + '</div>' +
+    '<div id="rasig-suma" style="font-size:13px;font-weight:700;padding:8px 12px;border-radius:8px;margin:8px 0"></div>' +
+    '<input id="rasig-buscar" placeholder="🔍 Buscar por número (F-7890) o cliente..." oninput="remAsigRender()" style="padding:8px 10px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-bottom:8px;font-family:inherit"/>' +
+    '<div id="rasig-lista" style="flex:1;overflow:auto;border:1px solid #eee;border-radius:8px"></div>' +
+    '<div style="display:flex;gap:8px;margin-top:12px">' +
+      '<button onclick="remAsigGuardar()" style="flex:1;padding:10px;background:#1a2e6e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✓ Asignar selección</button>' +
+      '<button onclick="document.getElementById(\'rasig-modal\').remove()" style="padding:10px 16px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;font-size:13px;cursor:pointer">Cancelar</button>' +
+    '</div></div>';
+  div.onclick = e => { if (e.target === div) div.remove(); };
+  document.body.appendChild(div);
+  remAsigRender();
+}
+
+function remAsigToggle(clave) {
+  const c = remAsig.pool.find(x => x.clave === clave);
+  if (!c) return;
+  if (remAsig.sel[clave]) delete remAsig.sel[clave]; else remAsig.sel[clave] = c;
+  remAsigRender();
+}
+
+function remAsigRender() {
+  const q = (document.getElementById('rasig-buscar').value || '').toLowerCase();
+  const suma = Object.values(remAsig.sel).reduce((s, c) => s + c.importe, 0);
+  const dif = remAsig.objetivo - suma;
+  const cuadra = Math.abs(dif) < 0.01;
+  const el = document.getElementById('rasig-suma');
+  el.style.background = cuadra ? '#e8f7ef' : '#fff4e0';
+  el.style.color = cuadra ? '#1b7a3d' : '#c96a10';
+  el.textContent = Object.keys(remAsig.sel).length + ' seleccionada(s) · suman ' + bkFmt(suma) +
+    (cuadra ? ' — ✓ CUADRA con el recibo' : ' — diferencia ' + bkFmt(dif));
+  let lista = remAsig.pool;
+  if (q) lista = lista.filter(c => c.clave.toLowerCase().includes(q) || (c.cliente || '').toLowerCase().includes(q));
+  document.getElementById('rasig-lista').innerHTML = lista.slice(0, 200).map(c => {
+    const sel = !!remAsig.sel[c.clave];
+    const imp = remAsig.imputadas[bkNormClave(c.clave)];
+    return '<label style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #f3f3f3;cursor:pointer;background:' + (sel ? '#eef4ff' : '#fff') + '">' +
+      '<input type="checkbox" ' + (sel ? 'checked' : '') + ' onchange="remAsigToggle(\'' + c.clave.replace(/'/g, "\\'") + '\')" style="width:auto"/>' +
+      '<span style="flex:1;font-size:12.5px"><b>' + c.clave + '</b> · ' + c.fecha +
+      (imp ? ' <span style="color:#c96a10;font-size:10.5px">⚠ imputada: ' + imp.fecha + ' · ' + imp.concepto + '… — tu asignación la moverá aquí</span>' : '') +
+      '<br><span style="color:#888">' + (c.cliente || '') + '</span></span>' +
+      '<b style="font-size:12.5px">' + bkFmt(c.importe) + '</b></label>';
+  }).join('') || '<div style="padding:14px;font-size:13px;color:#888">Nada que coincida.</div>';
+}
+
+async function remAsigGuardar() {
+  const seles = Object.values(remAsig.sel);
+  if (!seles.length) { alert('Marca al menos una factura.'); return; }
+  const suma = seles.reduce((s, c) => s + c.importe, 0);
+  if (Math.abs(suma - remAsig.objetivo) >= 0.01 &&
+      !confirm('La selección suma ' + bkFmt(suma) + ' y el recibo es de ' + bkFmt(remAsig.objetivo) + ' — no cuadra exacto.\n¿Asignar igualmente?')) return;
+  const m = (bkRemesasDatos.remesas || []).find(x => x.id === remAsig.movId);
+  if (!m) return;
+  // LA VERDAD MANUAL PREVALECE: si alguna seleccionada estaba imputada en otro movimiento
+  // (por suposición de la app), se quita de allí antes de asignarla aquí
+  const robos = seles.map(c => ({ c: c, imp: remAsig.imputadas[bkNormClave(c.clave)] })).filter(x => x.imp);
+  if (robos.length) {
+    if (!confirm('⚠ ' + robos.length + ' factura(s) ya estaban imputadas en otro movimiento:\n\n' +
+      robos.map(x => '· ' + x.c.clave + ' → ' + x.imp.fecha + ' · ' + x.imp.concepto + '…').join('\n') +
+      '\n\nTu asignación manual PREVALECE: se quitarán de allí y se imputarán aquí. ¿Continuar?')) return;
+    try {
+      const rM = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+      const todos = (await rM.json()).movimientos || [];
+      // agrupar robos por movimiento afectado
+      const porMov = {};
+      robos.forEach(x => { (porMov[x.imp.movId] = porMov[x.imp.movId] || []).push(bkNormClave(x.c.clave)); });
+      for (const [mid, claves] of Object.entries(porMov)) {
+        const otro = todos.find(t => t.id === parseInt(mid));
+        if (!otro) continue;
+        const limpio = (otro.conciliado || []).map(e => {
+          if ((e.serie || '').toUpperCase() === 'REF') {
+            // grupo del fichero: quitar solo la(s) referencia(s) robada(s) del texto
+            let num = String(e.numero || '');
+            (num.match(/[A-Z]+\s*-?\s*\d+/gi) || []).forEach(rf => {
+              if (claves.includes(bkNormClave(rf))) num = num.replace(rf, '').replace(/\s+/g, ' ').trim();
+            });
+            return Object.assign({}, e, { numero: num });
+          }
+          return e;
+        }).filter(e => {
+          if ((e.serie || '').toUpperCase() === 'REF') return String(e.numero || '').trim() !== '';
+          return !claves.includes(bkNormClave((e.serie || '') + '-' + (e.numero || '')));
+        });
+        await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+          body: JSON.stringify({ id: parseInt(mid), facturas: limpio })
+        });
+      }
+    } catch(e) { alert('✗ Error liberando las facturas: ' + e.message); return; }
+  }
+  const nuevo = m.conciliado.slice();
+  nuevo.splice(remAsig.fi, 1, ...seles.map(c => ({ serie: c.serie, numero: c.numero,
+    importe: seles.length === 1 ? remAsig.objetivo : c.importe,
+    cliente: remAsig.cliente + ' ✎', situacion: remAsig.situacion })));
+  try {
+    const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: remAsig.movId, facturas: nuevo })
+    });
+    if ((await r.json()).ok) {
+      document.getElementById('rasig-modal').remove();
       bkRemesas();
     } else alert('✗ No se pudo guardar');
   } catch(e) { alert('✗ ' + e.message); }
