@@ -736,15 +736,29 @@
             </select>
             <input type="text" id="pv-buscar" oninput="pvRender()" placeholder="Buscar proveedor o archivo..."
                    style="padding:6px 10px;border:1.5px solid #dde;border-radius:8px;font-size:12px;min-width:200px"/>
-            <button onclick="pvControlAlbaranes()" title="Detectar albaranes que no tienen factura posterior del mismo proveedor" style="padding:6px 12px;background:#b45309;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🔎 Albaranes sin factura</button>
-            <button onclick="pvCuadrarAnio()" title="Mover a su carpeta de año los documentos cuya fecha real no coincide con el año actual" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📅 Cuadrar por año</button>
-            <button onclick="pvReescanearTodo()" id="pv-reescan" title="Releer el importe de TODOS los años con la lógica actual (respeta los corregidos a mano)" style="padding:6px 12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">♻ Releer todos los años</button>
-            <button onclick="pvCorreo()" id="pv-correo" title="Buscar facturas PDF en el correo (Outlook + Webempresa) y dejarlas en el cajón IA" style="padding:6px 12px;background:#1a7a3f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📧 Facturas del correo</button>
-            <button onclick="pvOrdenarCajon()" id="pv-cajon" title="Ordenar las facturas del cajón desastre IA en sus meses" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🗂 Ordenar cajón IA</button>
-            <button onclick="pvBorrarDuplicados()" id="pv-dup" title="Eliminar del Dropbox los PDF duplicados (se conserva el original)" style="padding:6px 12px;background:#c0392b;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🧹 Duplicados</button>
-            <button onclick="pvOCR()" id="pv-ocr" title="Leer con IA las facturas escaneadas o dudosas" style="padding:6px 12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🤖 OCR IA</button>
-            <button onclick="pvEscanear()" id="pv-escanear" title="Extraer importes y fechas de los PDF" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🔍 Escanear importes</button>
             <button onclick="pvCargar()" title="Actualizar" style="padding:6px 10px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;cursor:pointer;font-size:12px">⟳</button>
+          </span>
+        </div>
+        <!-- Botonera ordenada por flujo de trabajo -->
+        <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:12px;font-size:12px">
+          <span style="display:flex;gap:6px;align-items:center;background:#f7f9fd;border:1px solid var(--borde);border-radius:10px;padding:6px 10px">
+            <b style="color:var(--texto-suave);font-size:10.5px;text-transform:uppercase">1 · Entrada</b>
+            <input type="file" id="pv-subir" accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png" multiple style="display:none" onchange="pvSubirManual(this.files)"/>
+            <button onclick="document.getElementById('pv-subir').click()" title="Subir facturas a mano (PDF, Excel, JPG, PNG) — van al cajón IA y de ahí a su mes" style="padding:6px 12px;background:#1a2e6e;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">➕ Subir factura</button>
+            <button onclick="pvCorreo()" id="pv-correo" title="Buscar facturas PDF en el correo (Outlook + Webempresa) y dejarlas en el cajón IA" style="padding:6px 12px;background:#1a7a3f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📧 Del correo</button>
+            <button onclick="pvOrdenarCajon()" id="pv-cajon" title="Ordenar las facturas del cajón desastre IA en sus meses" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🗂 Ordenar cajón</button>
+          </span>
+          <span style="display:flex;gap:6px;align-items:center;background:#f7f9fd;border:1px solid var(--borde);border-radius:10px;padding:6px 10px">
+            <b style="color:var(--texto-suave);font-size:10.5px;text-transform:uppercase">2 · Lectura</b>
+            <button onclick="pvEscanear()" id="pv-escanear" title="Extraer importes y fechas de los PDF" style="padding:6px 12px;background:#e87e1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🔍 Escanear</button>
+            <button onclick="pvOCR()" id="pv-ocr" title="Leer con IA las facturas escaneadas o dudosas" style="padding:6px 12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🤖 OCR IA</button>
+            <button onclick="pvReescanearTodo()" id="pv-reescan" title="Releer el importe de TODOS los años con la lógica actual (respeta los corregidos a mano)" style="padding:6px 12px;background:#ede9fe;border:1px solid #c4b5fd;color:#6d28d9;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">♻ Releer años</button>
+          </span>
+          <span style="display:flex;gap:6px;align-items:center;background:#f7f9fd;border:1px solid var(--borde);border-radius:10px;padding:6px 10px">
+            <b style="color:var(--texto-suave);font-size:10.5px;text-transform:uppercase">3 · Control</b>
+            <button onclick="pvBorrarDuplicados()" id="pv-dup" title="Eliminar del Dropbox los PDF duplicados (se conserva el original)" style="padding:6px 12px;background:#fde8e8;border:1px solid #e0b0b0;color:#c0392b;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🧹 Duplicados</button>
+            <button onclick="pvControlAlbaranes()" title="Detectar albaranes que no tienen factura posterior del mismo proveedor" style="padding:6px 12px;background:#b45309;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">🔎 Albaranes s/fra.</button>
+            <button onclick="pvCuadrarAnio()" title="Mover a su carpeta de año los documentos cuya fecha real no coincide con el año actual" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">📅 Cuadrar año</button>
           </span>
         </div>
         <div id="pv-resumen" style="font-size:12px;color:var(--texto-suave);margin-bottom:8px"></div>
@@ -1099,7 +1113,10 @@ function bkNormClave(s) {
 function bkClavesDeConciliado(lista) {
   const out = [];
   (lista || []).forEach(f => {
-    if ((f.serie || '').toUpperCase() === 'REF') {
+    if (f.ruta) {
+      // factura de PROVEEDOR: la clave única es su ruta en el Dropbox
+      out.push([('PROV:' + f.ruta).toUpperCase(), f]);
+    } else if ((f.serie || '').toUpperCase() === 'REF') {
       (String(f.numero || '').match(/[A-Z]+\s*-?\s*\d+/gi) || []).forEach(r => out.push([bkNormClave(r), f]));
     } else {
       out.push([bkNormClave((f.serie || '') + '-' + (f.numero || '')), f]);
@@ -2415,8 +2432,13 @@ async function bkCargar() {
     ]);
     bkMovs = (await rMov.json()).movimientos || [];
     // Facturas ya usadas en CUALQUIER conciliación (claves normalizadas, grupos REF expandidos)
+    // + importes ya imputados por factura (para pagos a cuenta de proveedores)
     bkUsadas = new Set();
-    bkMovs.forEach(m => bkClavesDeConciliado(m.conciliado).forEach(([k]) => bkUsadas.add(k)));
+    bkImputado = {};
+    bkMovs.forEach(m => bkClavesDeConciliado(m.conciliado).forEach(([k, f]) => {
+      bkUsadas.add(k);
+      bkImputado[k] = Math.round(((bkImputado[k] || 0) + (f.importe || 0)) * 100) / 100;
+    }));
     bkActualizarBancos();
     const res = await rRes.json();
     // Cuadre = % de movimientos explicados (conciliados con documento o categorizados)
@@ -2655,6 +2677,7 @@ function bkCandidatos(mov) {
       .map(f => ({
         clave: 'PROV:' + f.ruta,
         serie: 'PROV', numero: f.nombre,
+        ruta: f.ruta,
         fecha: f.fecha || '',
         importe: f.total,
         cliente: f.proveedor || ''
@@ -2699,6 +2722,7 @@ function bkNombreEnConcepto(cliente, concepto) {
 }
 
 let bkUsadas = new Set();  // facturas ya conciliadas en algún movimiento
+let bkImputado = {};       // importe ya imputado por factura (pagos a cuenta)
 let bkCandsVisibles = [];  // candidatos pintados en el modal (para 👁 y ✎)
 
 function bkVerDocCand(ci) {
@@ -2736,7 +2760,16 @@ function bkModalRender() {
   // EXCEPCIÓN: en una devolución de recibo, la factura está conciliada en su remesa — debe verse.
   const totalCands = cands.length;
   if (!bkEsDevolCliente(bkMovActual)) {
-    cands = cands.filter(c => !bkUsadas.has(bkNormClave(c.clave)) || bkSeleccion[c.clave]);
+    cands = cands.filter(c => {
+      const k = bkNormClave(c.clave);
+      if (!bkUsadas.has(k) || bkSeleccion[c.clave]) { c._restante = 0; return true; }
+      // PAGOS A CUENTA: factura de proveedor parcialmente pagada → se ofrece por lo que QUEDA
+      if (c.ruta) {
+        const queda = Math.round((c.importe - (bkImputado[k] || 0)) * 100) / 100;
+        if (queda > 0.01) { c._restante = queda; return true; }
+      }
+      return false;
+    });
   }
   const ocultadas = totalCands - cands.length;
   if (!cands.length) {
@@ -2771,9 +2804,11 @@ function bkModalRender() {
       : '';
     return '<label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid #f3f3f3;cursor:pointer;background:' + (sel ? '#eef4ff' : '#fff') + '">' +
       '<input type="checkbox" ' + (sel ? 'checked' : '') + ' onchange="bkToggle(\'' + c.clave + '\')" style="width:auto"/>' +
-      '<span style="flex:1;font-size:12.5px"><b>' + c.clave + '</b> · ' + c.fecha + '<br><span style="color:#888">' + c.cliente + '</span></span>' +
+      '<span style="flex:1;font-size:12.5px"><b>' + c.clave + '</b> · ' + c.fecha +
+      (c._restante ? ' <span style="color:#b45309;font-size:10.5px;font-weight:700">💳 a cuenta: pagados ' + bkFmt(c.importe - c._restante) + ', quedan ' + bkFmt(c._restante) + '</span>' : '') +
+      '<br><span style="color:#888">' + c.cliente + '</span></span>' +
       herr +
-      '<span style="font-weight:800;font-size:12.5px">' + bkFmt(c.importe) + '</span></label>';
+      '<span style="font-weight:800;font-size:12.5px">' + bkFmt(c._restante || c.importe) + '</span></label>';
   }).join('');
   bkSuma();
 }
@@ -2781,8 +2816,13 @@ function bkModalRender() {
 function bkToggle(clave) {
   if (bkSeleccion[clave]) delete bkSeleccion[clave];
   else {
-    const c = bkCandidatos(bkMovActual).find(x => x.clave === clave);
-    if (c) bkSeleccion[clave] = c;
+    // preferir el candidato pintado (lleva _restante si la factura ya tiene pagos a cuenta)
+    const c = bkCandsVisibles.find(x => x.clave === clave) || bkCandidatos(bkMovActual).find(x => x.clave === clave);
+    if (c) {
+      const sel = Object.assign({}, c);
+      if (c._restante) sel.importe = c._restante;  // imputar solo lo que QUEDA de la factura
+      bkSeleccion[clave] = sel;
+    }
   }
   bkModalRender();
 }
@@ -2863,7 +2903,17 @@ async function bkGuardarConciliacion() {
   const seles = Object.values(bkSeleccion);
   if (!seles.length) { alert('Marca al menos una factura.'); return; }
   const objetivo = Math.abs(bkMovActual.importe);
-  const suma = seles.reduce((s, c) => s + c.importe, 0);
+  let suma = seles.reduce((s, c) => s + c.importe, 0);
+  // PAGO A CUENTA: una sola factura de proveedor mayor que el movimiento → imputar solo
+  // el importe del movimiento; el resto queda pendiente para futuros pagos
+  if (seles.length === 1 && seles[0].ruta && suma - objetivo >= 0.01) {
+    if (confirm('La factura (' + bkFmt(suma) + ') es MAYOR que este pago (' + bkFmt(objetivo) + ').\n\n' +
+      '¿Imputar solo ' + bkFmt(objetivo) + ' como PAGO A CUENTA? La factura quedará parcialmente pagada\n' +
+      '(quedarán ' + bkFmt(suma - objetivo) + ' pendientes, asignables a futuros pagos).')) {
+      seles[0] = Object.assign({}, seles[0], { importe: objetivo, parcial: true });
+      suma = objetivo;
+    }
+  }
   if (Math.abs(suma - objetivo) >= 0.005 &&
       !confirm('La suma (' + bkFmt(suma) + ') no cuadra con el movimiento (' + bkFmt(objetivo) + ').\n¿Conciliar igualmente?')) return;
   try {
@@ -2872,6 +2922,8 @@ async function bkGuardarConciliacion() {
       headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
       body: JSON.stringify({ id: bkMovActual.id, facturas: seles.map(c => {
         const f = { serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente };
+        if (c.ruta) f.ruta = c.ruta;                      // clave única de la factura de proveedor
+        if (c.parcial || c._restante) f.parcial = true;   // marca de pago a cuenta
         if (bkEsDevolCliente(bkMovActual)) f.situacion = 'devuelto';  // el cargo de devolución marca la factura como devuelta
         return f;
       }) })
@@ -4108,6 +4160,34 @@ async function pvCuadrarAnio() {
     await pvCargarDatos(anio);
     pvRender();
   } catch(e) { alert('✗ ' + e.message); }
+}
+
+// ➕ Carga manual de facturas (PDF/Excel/JPG/PNG) → cajón desastre IA → circuito normal
+async function pvSubirManual(files) {
+  if (!files || !files.length) return;
+  let ok = 0, errores = [];
+  for (const f of files) {
+    try {
+      const r = await fetch(BRIDGE_URL_C + '/proveedores/subir_doc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ nombre: f.name, archivo_base64: await blobABase64C(f) })
+      });
+      const d = await r.json();
+      if (d.ok) ok++; else errores.push(f.name + ': ' + (d.error || 'error'));
+    } catch(e) { errores.push(f.name + ': ' + e.message); }
+  }
+  document.getElementById('pv-subir').value = '';
+  const hayPdf = [...files].some(f => /\.pdf$/i.test(f.name));
+  if (ok && hayPdf && confirm('➕ ' + ok + ' archivo(s) subidos al cajón IA' +
+      (errores.length ? '\n✗ ' + errores.join('\n✗ ') : '') +
+      '\n\n¿Ordeno el cajón ahora? (cada PDF a su mes, con fecha leída del documento)')) {
+    pvOrdenarCajon();
+  } else if (ok) {
+    alert('➕ ' + ok + ' archivo(s) en el cajón IA.' +
+      (errores.length ? '\n✗ ' + errores.join('\n✗ ') : '') +
+      (hayPdf ? '' : '\n(Excel/imágenes quedan en el cajón para colocarlos a mano — el 🗂 solo ordena PDFs.)'));
+  } else alert('✗ No se subió nada:\n' + errores.join('\n'));
 }
 
 const pvSel = new Set();
