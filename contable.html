@@ -1190,10 +1190,122 @@ async function bkMarcarDevueltaEnOrigen(clave, importe, deudor) {
   } catch(e) { return false; }
 }
 
+// Devolución ANÓNIMA (Sabadell: "IMPAGADO RECIBOS DOMICIL. SEPA DEVOLUCION RECIBO" no trae el
+// nombre del deudor): se localiza el recibo devuelto por IMPORTE dentro de las remesas ya
+// desglosadas (la remesa va antes del cargo, ventana de 60 días, mismo banco si hay empate).
+function bkBuscarReciboEnRemesas(m, movs) {
+  const objetivo = Math.abs(m.importe);
+  let cands = [];
+  for (const mm of movs) {
+    if (!(mm.importe > 0) || !(mm.conciliado || []).length) continue;
+    if (!/REMESA|REM\.?\s*RECIBOS|ADEUDOS/i.test(mm.concepto || '')) continue;   // solo remesas de recibos
+    if (m.fecha && mm.fecha) {
+      if (mm.fecha > m.fecha) continue;                                          // la remesa va antes
+      if ((new Date(m.fecha) - new Date(mm.fecha)) / 86400000 > 60) continue;    // ventana razonable
+    }
+    (mm.conciliado || []).forEach((e, idx) => {
+      const s = (e.serie || '').toUpperCase();
+      if (s === 'GASTOS' || s === 'REF' || s === 'DESCUADRE' || e.ruta) return;   // ni gastos, ni grupos, ni descuadres, ni proveedores
+      if ((e.situacion || 'abonado') === 'devuelto') return; // ya está marcada
+      if (Math.abs((e.importe || 0) - objetivo) < 0.01) cands.push({ mov: mm, idx, e });
+    });
+  }
+  if (cands.length > 1 && m.banco) {                          // desempate 1: mismo banco
+    const mismo = cands.filter(c => c.mov.banco === m.banco);
+    if (mismo.length) cands = mismo;
+  }
+  if (cands.length > 1) {                                     // desempate 2: la remesa más cercana
+    cands.sort((a, b) => (b.mov.fecha || '').localeCompare(a.mov.fecha || ''));
+    if ((cands[0].mov.fecha || '') !== (cands[1].mov.fecha || '')) cands = [cands[0]];
+  }
+  return cands.length === 1 ? cands[0] : null;                // con dudas, no se inventa nada
+}
+
+// Marca ↩ DEVUELTO el recibo hallado por importe en su remesa de origen. Si el recibo estaba
+// "sin factura localizada" y la devolución sí identificó la factura (c), se aprovecha y se rellena.
+async function bkMarcarDevueltaPorImporte(m, movs, c) {
+  const hit = bkBuscarReciboEnRemesas(m, movs);
+  if (!hit) return null;
+  const nuevo = (hit.mov.conciliado || []).map((e, i) => {
+    if (i !== hit.idx) return e;
+    const ne = Object.assign({}, e, { situacion: 'devuelto' });
+    if (c && (!e.serie || e.serie === '—')) {
+      ne.serie = c.serie; ne.numero = c.numero;
+      ne.cliente = ne.cliente || c.cliente;
+    }
+    return ne;
+  });
+  try {
+    await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ id: hit.mov.id, facturas: nuevo })
+    });
+    hit.mov.conciliado = nuevo;  // al día en memoria: otra devolución igual no re-casará este recibo
+    return hit;
+  } catch (e) { return null; }
+}
+
 // ¿Es este cargo una devolución de recibo de CLIENTE? (no un pago a proveedor)
 function bkEsDevolCliente(m) {
   return !!(m && m.importe < 0 && /DEVOL|DEVUELT|IMPAGAD/i.test(m.concepto || '') &&
     !/TRANSF\w*\.?\s+A\b/i.test(m.concepto || ''));
+}
+
+// ⚖ DESCUADRE EXPLICADO: al aceptar una conciliación que no cuadra al céntimo, la diferencia
+// se anota como línea "DESCUADRE" con su motivo — el movimiento cuadra y queda la traza del porqué.
+const BK_MOTIVOS_DESCUADRE = [
+  ['💸', 'Gastos de devolución repercutidos'],
+  ['🏦', 'Fallo en la transferencia del cliente'],
+  ['🫥', 'Cliente desaparecido / incobrable'],
+  ['✍', 'Error de escritura (importe mal tecleado)'],
+  ['🪙', 'Redondeo / céntimos'],
+];
+function bkPedirDescuadre(dif, cliente, opciones) {
+  // dif = movimiento − facturas (con signo). opciones.sinExplicar añade "Conciliar sin explicar".
+  return new Promise(resolve => {
+    const viejo = document.getElementById('bk-desc-modal');
+    if (viejo) viejo.remove();
+    const div = document.createElement('div');
+    div.id = 'bk-desc-modal';
+    div.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(15,31,92,.55);display:flex;align-items:center;justify-content:center';
+    const fin = v => { div.remove(); resolve(v); };
+    div.innerHTML = '<div style="background:#fff;border-radius:14px;padding:20px;width:470px;max-width:95vw;box-shadow:0 18px 50px rgba(0,0,0,.3)">' +
+      '<div style="font-weight:800;font-size:15px;color:#1a2e6e">⚖ Descuadre de ' + bkFmt(dif) + (cliente ? ' · ' + cliente : '') + '</div>' +
+      '<div style="font-size:12.5px;color:var(--texto-suave);margin:6px 0 10px">¿Por qué no cuadra? Se anotará como línea de descuadre para que cuadre al céntimo y quede la traza.</div>' +
+      '<div id="bk-desc-ops" style="display:flex;flex-direction:column;gap:6px"></div>' +
+      '<input id="bk-desc-otro" placeholder="✏ Otro motivo o detalle adicional (texto libre)..." style="margin-top:8px;width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid #dde;border-radius:8px;font-size:13px;font-family:inherit"/>' +
+      '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">' +
+        '<button id="bk-desc-ok" style="flex:1;padding:9px;background:#1a2e6e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✓ Anotar descuadre</button>' +
+        (opciones && opciones.sinExplicar ? '<button id="bk-desc-sin" title="Conciliar dejando la diferencia sin explicar (no recomendado)" style="padding:9px 12px;background:#fff3e0;border:1.5px solid #e8b27a;color:#b45309;border-radius:8px;font-size:12px;cursor:pointer">Sin explicar</button>' : '') +
+        '<button id="bk-desc-no" style="padding:9px 12px;background:#f0f4fb;border:1.5px solid #c0cbea;border-radius:8px;font-size:13px;cursor:pointer">Cancelar</button>' +
+      '</div></div>';
+    document.body.appendChild(div);
+    let motivo = '';
+    const ops = div.querySelector('#bk-desc-ops');
+    BK_MOTIVOS_DESCUADRE.forEach(([emo, txt]) => {
+      const b = document.createElement('button');
+      b.style.cssText = 'text-align:left;padding:8px 10px;background:#f7f9ff;border:1.5px solid #dde4f5;border-radius:8px;font-size:12.5px;cursor:pointer;font-family:inherit';
+      b.textContent = emo + ' ' + txt;
+      b.onclick = () => {
+        motivo = txt;
+        [...ops.children].forEach(x => { x.style.background = '#f7f9ff'; x.style.borderColor = '#dde4f5'; });
+        b.style.background = '#eef4ff'; b.style.borderColor = '#1a2e6e';
+      };
+      ops.appendChild(b);
+    });
+    div.querySelector('#bk-desc-ok').onclick = () => {
+      const otro = (div.querySelector('#bk-desc-otro').value || '').trim();
+      const texto = [motivo, otro].filter(Boolean).join(' — ');
+      if (!texto) { alert('Elige un motivo o escribe uno.'); return; }
+      fin({ serie: 'DESCUADRE', numero: texto.slice(0, 90),
+            importe: Math.round(dif * 100) / 100, cliente: cliente || '' });
+    };
+    const sin = div.querySelector('#bk-desc-sin');
+    if (sin) sin.onclick = () => fin('sin');
+    div.querySelector('#bk-desc-no').onclick = () => fin(null);
+    div.onclick = e => { if (e.target === div) fin(null); };
+  });
 }
 
 function actualizarDashboard() {
@@ -2950,19 +3062,27 @@ async function bkGuardarConciliacion() {
       suma = objetivo;
     }
   }
-  if (Math.abs(suma - objetivo) >= 0.005 &&
-      !confirm('La suma (' + bkFmt(suma) + ') no cuadra con el movimiento (' + bkFmt(objetivo) + ').\n¿Conciliar igualmente?')) return;
+  // Descuadre: en vez de un "¿conciliar igualmente?" a ciegas, se pide el MOTIVO y se anota
+  let lineaDescuadre = null;
+  if (Math.abs(suma - objetivo) >= 0.005) {
+    const res = await bkPedirDescuadre(Math.round((objetivo - suma) * 100) / 100,
+      (seles[0] && seles[0].cliente) || '', { sinExplicar: true });
+    if (res === null) return;
+    if (res !== 'sin') lineaDescuadre = res;
+  }
   try {
+    const lista = seles.map(c => {
+      const f = { serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente };
+      if (c.ruta) f.ruta = c.ruta;                      // clave única de la factura de proveedor
+      if (c.parcial || c._restante) f.parcial = true;   // marca de pago a cuenta
+      if (bkEsDevolCliente(bkMovActual)) f.situacion = 'devuelto';  // el cargo de devolución marca la factura como devuelta
+      return f;
+    });
+    if (lineaDescuadre) lista.push(lineaDescuadre);
     const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-      body: JSON.stringify({ id: bkMovActual.id, facturas: seles.map(c => {
-        const f = { serie: c.serie, numero: c.numero, importe: c.importe, cliente: c.cliente };
-        if (c.ruta) f.ruta = c.ruta;                      // clave única de la factura de proveedor
-        if (c.parcial || c._restante) f.parcial = true;   // marca de pago a cuenta
-        if (bkEsDevolCliente(bkMovActual)) f.situacion = 'devuelto';  // el cargo de devolución marca la factura como devuelta
-        return f;
-      }) })
+      body: JSON.stringify({ id: bkMovActual.id, facturas: lista })
     });
     const d = await r.json();
     if (!d.ok) throw new Error('No se pudo guardar');
@@ -3055,10 +3175,11 @@ async function bkAutoconciliar() {
   // Fuentes: facturas de Ágora (abonos) y de proveedor (cargos) — cada movimiento usa la suya
 
   // Facturas ya usadas en alguna conciliación (de cualquier movimiento)
-  let usadas = new Set();
+  let usadas = new Set(), todosMovs = [];
   try {
     const rTodos = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
-    ((await rTodos.json()).movimientos || []).forEach(m => {
+    todosMovs = (await rTodos.json()).movimientos || [];
+    todosMovs.forEach(m => {
       bkClavesDeConciliado(m.conciliado).forEach(([k]) => usadas.add(k));
     });
   } catch(e) { alert('Error consultando movimientos: ' + e.message); return; }
@@ -3128,6 +3249,18 @@ async function bkAutoconciliar() {
       // Las remesas NO se adivinan por combinación de importes (inventaba desgloses falsos
       // que secuestraban facturas) — se desglosan con el listado real del banco: pestaña 🧩 Remesas → 📎 PDF
     }
+    // Devolución ANÓNIMA del Sabadell sin factura que casar: buscar el recibo por IMPORTE
+    // en las remesas desglosadas (caso KIOR: recibo "sin factura localizada" devuelto días después)
+    let marcadoYa = false;
+    if (!facturasElegidas && esDevol) {
+      const hit = await bkMarcarDevueltaPorImporte(m, todosMovs, null);
+      if (hit) {
+        facturasElegidas = [{ serie: hit.e.serie || '—', numero: hit.e.numero || '',
+          importe: Math.abs(m.importe), cliente: hit.e.cliente || '', clave: '' }];
+        devolsCasadas++;
+        marcadoYa = true;  // la remesa de origen ya está en rojo ↩
+      }
+    }
     if (facturasElegidas) {
       try {
         const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
@@ -3142,11 +3275,14 @@ async function bkAutoconciliar() {
         if ((await r.json()).ok) {
           hechos++;
           if (!esDevol) facturasElegidas.forEach(c => usadas.add(bkNormClave(c.clave)));  // la devuelta sigue en su remesa
-          else {
+          else if (!marcadoYa) {
             // y además la remesa de origen pasa a mostrarla en ROJO ↩ (corrige el "abonado" del Sabadell)
             for (const c of facturasElegidas) {
-              if (c.serie === 'GASTOS') continue;
-              await bkMarcarDevueltaEnOrigen(bkNormClave(c.serie + '-' + c.numero), c.importe, c.cliente);
+              if (c.serie === 'GASTOS' || c.serie === 'DESCUADRE') continue;
+              const ok = await bkMarcarDevueltaEnOrigen(bkNormClave(c.serie + '-' + c.numero), c.importe, c.cliente);
+              // si la remesa tenía el recibo SIN factura ("sin factura localizada"), se busca por
+              // importe y de paso se le pone la factura que la devolución acaba de identificar
+              if (!ok) await bkMarcarDevueltaPorImporte(m, todosMovs, c);
             }
           }
         }
@@ -3220,6 +3356,8 @@ async function bkRemesas() {
             const fra = f.serie === '—'
                       ? '<i style="color:#c96a10">sin factura localizada</i> <button onclick="remesaAsignarManual(' + m.id + ',' + fi + ')" title="Asignar la(s) factura(s) a mano desde el listado" style="padding:2px 8px;background:#1a2e6e;color:#fff;border:none;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer">✎ Asignar</button>'
                       : f.serie === 'REF' ? '<b>' + f.numero + '</b>'
+                      : f.serie === 'GASTOS' ? '<i style="color:#7c5c10">💸 ' + f.numero + '</i>'
+                      : f.serie === 'DESCUADRE' ? '<i style="color:#7c5c10">⚖ descuadre: ' + f.numero + '</i>'
                       : '<b>' + f.serie + '-' + f.numero + '</b>';
             return '<tr' + (dev ? ' style="color:#c0392b;font-weight:700"' : '') + '><td>' + fra + '</td><td>' +
               (f.cliente || '—') + (dev ? ' ↩ DEVUELTO' : '') +
@@ -3609,14 +3747,21 @@ async function remCuadreGuardar() {
   const seles = Object.values(remCuadre.sel);
   if (!seles.length) { alert('Marca al menos una factura.'); return; }
   const suma = seles.reduce((s, c) => s + c.importe, 0);
-  if (Math.abs(suma - remCuadre.objetivo) >= 0.01 &&
-      !confirm('La selección suma ' + bkFmt(suma) + ' y la remesa es de ' + bkFmt(remCuadre.objetivo) + ' — NO cuadra exacto.\n¿Conciliar igualmente?')) return;
+  const difC = Math.round((remCuadre.objetivo - suma) * 100) / 100;
+  let lineaDescC = null;
+  if (Math.abs(difC) >= 0.01) {
+    const res = await bkPedirDescuadre(difC, '', { sinExplicar: true });
+    if (res === null) return;
+    if (res !== 'sin') lineaDescC = Object.assign(res, { situacion: 'abonado', origen: 'propuesta' });
+  }
   try {
+    const listaC = seles.map(c => ({ serie: c.serie, numero: c.numero,
+      importe: c.importe, cliente: c.cliente, situacion: 'abonado', origen: 'propuesta' }));
+    if (lineaDescC) listaC.push(lineaDescC);
     const r = await fetch(BRIDGE_URL_C + '/banco/conciliar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-      body: JSON.stringify({ id: remCuadre.id, facturas: seles.map(c => ({ serie: c.serie, numero: c.numero,
-        importe: c.importe, cliente: c.cliente, situacion: 'abonado', origen: 'propuesta' })) })
+      body: JSON.stringify({ id: remCuadre.id, facturas: listaC })
     });
     if ((await r.json()).ok) {
       document.getElementById('remc-modal').remove();
@@ -3705,16 +3850,17 @@ async function remAsigGuardar() {
   const suma = seles.reduce((s, c) => s + c.importe, 0);
   const dif = Math.round((remAsig.objetivo - suma) * 100) / 100;
   let lineaGastos = null;
-  if (dif >= 0.01) {
-    // El recibo cobra MÁS que la(s) factura(s): gastos repercutidos al cliente
+  if (Math.abs(dif) >= 0.01) {
+    // El recibo no cuadra con la(s) factura(s): se pide el MOTIVO del descuadre
     // (típico recobro de recibo devuelto: factura + gastos de devolución del banco)
-    if (!confirm('Tu factura suma ' + bkFmt(suma) + ' y el recibo es de ' + bkFmt(remAsig.objetivo) + '.\n\n' +
-      'La diferencia de ' + bkFmt(dif) + ' se anotará como "gastos repercutidos (dev. banco)" para que cuadre al céntimo.\n¿Continuar?')) return;
-    lineaGastos = { serie: 'GASTOS', numero: 'gastos repercutidos (dev. banco)', importe: dif,
-      cliente: remAsig.cliente, situacion: remAsig.situacion };
-  } else if (dif <= -0.01 &&
-      !confirm('Ojo: la selección suma ' + bkFmt(suma) + ', MÁS que el recibo (' + bkFmt(remAsig.objetivo) + ').\n¿Asignar igualmente?')) {
-    return;
+    const res = await bkPedirDescuadre(dif, remAsig.cliente, {});
+    if (!res) return;
+    if (/gastos de devoluci/i.test(res.numero)) {
+      // los gastos de devolución conservan su serie de siempre (GASTOS)
+      res.serie = 'GASTOS';
+      res.numero = 'gastos repercutidos (dev. banco)';
+    }
+    lineaGastos = Object.assign(res, { situacion: remAsig.situacion });
   }
   const m = (bkRemesasDatos.remesas || []).find(x => x.id === remAsig.movId);
   if (!m) return;
