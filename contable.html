@@ -549,6 +549,9 @@
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <input type="text" id="fact-search" placeholder="🔍 Buscar por cliente, CIF o número..." oninput="filtrarFacturasC()"
             style="flex:1;min-width:200px;padding:9px 14px;border:1.5px solid var(--borde);border-radius:var(--radio-sm);font-family:'Outfit',sans-serif;font-size:13px;outline:none;color:var(--azul)" />
+          <input type="date" id="fact-desde" onchange="filtrarFacturasC()" title="Ver solo facturas desde esta fecha" style="padding:8px 10px;border:1.5px solid var(--borde);border-radius:var(--radio-sm);font-family:'Outfit',sans-serif;font-size:13px;color:var(--azul)"/>
+          <span style="color:var(--texto-suave);font-size:11px">—</span>
+          <input type="date" id="fact-hasta" onchange="filtrarFacturasC()" title="Ver solo facturas hasta esta fecha" style="padding:8px 10px;border:1.5px solid var(--borde);border-radius:var(--radio-sm);font-family:'Outfit',sans-serif;font-size:13px;color:var(--azul)"/>
           <select id="fact-estado" onchange="filtrarFacturasC()"
             style="padding:9px 14px;border:1.5px solid var(--borde);border-radius:var(--radio-sm);font-family:'Outfit',sans-serif;font-size:13px;color:var(--azul);outline:none">
             <option value="">Todos los estados</option>
@@ -570,15 +573,15 @@
             <thead>
               <tr>
                 <th><input type="checkbox" class="cb-all" id="fact-cb-all" onchange="toggleAllFacturas(this.checked)" /></th>
-                <th>Nº Factura</th>
-                <th>Fecha</th>
-                <th>Cliente</th>
-                <th>CIF</th>
-                <th>Base</th>
-                <th>IVA</th>
-                <th>Total</th>
-                <th>Método pago</th>
-                <th>Estado</th>
+                <th onclick="factOrdenar('num')" style="cursor:pointer" title="Ordenar">Nº Factura <span id="fact-arr-num"></span></th>
+                <th onclick="factOrdenar('fecha')" style="cursor:pointer" title="Ordenar">Fecha <span id="fact-arr-fecha"></span></th>
+                <th onclick="factOrdenar('cliente')" style="cursor:pointer" title="Ordenar">Cliente <span id="fact-arr-cliente"></span></th>
+                <th onclick="factOrdenar('cif')" style="cursor:pointer" title="Ordenar">CIF <span id="fact-arr-cif"></span></th>
+                <th onclick="factOrdenar('base')" style="cursor:pointer" title="Ordenar">Base <span id="fact-arr-base"></span></th>
+                <th onclick="factOrdenar('iva')" style="cursor:pointer" title="Ordenar">IVA <span id="fact-arr-iva"></span></th>
+                <th onclick="factOrdenar('total')" style="cursor:pointer" title="Ordenar">Total <span id="fact-arr-total"></span></th>
+                <th onclick="factOrdenar('metodo')" style="cursor:pointer" title="Ordenar">Método pago <span id="fact-arr-metodo"></span></th>
+                <th onclick="factOrdenar('estado')" style="cursor:pointer" title="Ordenar">Estado <span id="fact-arr-estado"></span></th>
                 <th>Acciones</th>
               </tr>
             </thead>
@@ -1504,6 +1507,8 @@ function actualizarDashboard() {
 function filtrarFacturasC() {
   const q = (document.getElementById('fact-search').value || '').toLowerCase();
   const estado = document.getElementById('fact-estado').value;
+  const fD = (document.getElementById('fact-desde') || {}).value || '';
+  const fH = (document.getElementById('fact-hasta') || {}).value || '';
   const hoy = new Date();
 
   facturasFiltC = todasFacturasC.filter(f => {
@@ -1511,6 +1516,10 @@ function filtrarFacturasC() {
     // Tickets simplificados y sus devoluciones (T/TD/D): conversiones internas, fuera de los listados
     if (/^(T|TD|D)$/i.test(f.Serie || '')) return false;
     if (!fcEnPeriodo(f)) return false;  // el listado obedece al período de la barra
+    // ...y al filtro de fechas propio de esta pestaña (afina dentro del período cargado)
+    const fF = (f.Date || '').slice(0, 10);
+    if (fD && fF && fF < fD) return false;
+    if (fH && fF && fF > fH) return false;
     const nombre = (f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '').toLowerCase();
     const cif = (f.Customer ? f.Customer.Cif || '' : '').toLowerCase();
     const num = (f.Serie + '-' + f.Number).toLowerCase();
@@ -1540,6 +1549,49 @@ function filtrarFacturasC() {
     return matchQ && matchEstado;
   });
 
+  factAplicarOrden();  // mantener el orden elegido en las cabeceras
+  renderTablaFacturas();
+}
+
+// ── Orden por columnas en el listado de emitidas (clic en la cabecera alterna ▲/▼) ──
+let factSort = { campo: 'fecha', dir: -1 };
+
+function factValor(f, campo) {
+  switch (campo) {
+    case 'num':     return (f.Serie || '') + '-' + String(f.Number || 0).padStart(9, '0');
+    case 'fecha':   return f.Date || '';
+    case 'cliente': return (f.Customer ? (f.Customer.BusinessName || f.Customer.FiscalName || '') : '').toUpperCase();
+    case 'cif':     return (f.Customer ? f.Customer.Cif || '' : '').toUpperCase();
+    case 'base':    return f.Totals ? f.Totals.NetAmount : 0;
+    case 'iva':     return f.Totals ? f.Totals.VatAmount : 0;
+    case 'total':   return f.Totals ? f.Totals.GrossAmount : 0;
+    case 'metodo':  return (((f.Payments || [])[0] || {}).MethodName || '').toUpperCase();
+    case 'estado': {
+      const banco = (bkCobradasBanco && bkCobradasBanco.cobradas) ? bkCobradasBanco : null;
+      const pagada = banco ? banco.cobradas.has(bkNormClave(f.Serie + '-' + f.Number)) : false;
+      return (pagada ? 'B-' : 'A-') + (f.Date || '');  // pendientes primero, las más viejas arriba
+    }
+    default: return '';
+  }
+}
+
+function factAplicarOrden() {
+  const { campo, dir } = factSort;
+  facturasFiltC.sort((a, b) => {
+    const va = factValor(a, campo), vb = factValor(b, campo);
+    if (va < vb) return -dir;
+    if (va > vb) return dir;
+    return 0;
+  });
+}
+
+function factOrdenar(campo) {
+  factSort = { campo: campo, dir: factSort.campo === campo ? -factSort.dir : (campo === 'fecha' ? -1 : 1) };
+  ['num', 'fecha', 'cliente', 'cif', 'base', 'iva', 'total', 'metodo', 'estado'].forEach(c => {
+    const el = document.getElementById('fact-arr-' + c);
+    if (el) el.textContent = c === campo ? (factSort.dir === 1 ? '▲' : '▼') : '';
+  });
+  factAplicarOrden();
   renderTablaFacturas();
 }
 
@@ -2644,7 +2696,161 @@ function descargarBlobC(blob, filename) {
 
 function fmC(v){ return (parseFloat(v)||0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €'; }
 function fdC(s){ if(!s)return '—'; var d=new Date(s); return isNaN(d)?s:d.toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'}); }
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+//  PLANTILLA OFICIAL DE FACTURA — RÉPLICA EXACTA del PDF de Ágora (identidad de marca)
+//  Calibrada al milímetro contra F-7842.pdf y Ticket_A4_with_discounts.rdlc:
+//  Verdana 8pt (cabeceras tabla 9pt, título 12pt, letra legal 6pt, IBAN 9pt),
+//  cabecera = BITMAP REAL extraído del PDF de Ágora (cabecera_factura.png, este repo),
+//  zebra #eeeeee, cabeceras de tabla Gainsboro (#dcdcdc), A4 con márgenes de 1cm.
+//  ⚠ NO TOCAR medidas ni textos (incluida la errata original "Télefono:") sin
+//    contrastar contra un PDF real de Ágora. Es identidad de marca.
+// ═══════════════════════════════════════════════════════════════════════════════════
+var CABECERA_FACTURA_URL = 'https://joanserramiret.github.io/averias-jstech/cabecera_factura.png';
+
 function generarHTMLFactura(f) {
+  var c = f.Customer || {};
+  var lineas = [];
+  if (f.InvoiceItems) f.InvoiceItems.forEach(function(it){ lineas = lineas.concat(it.Lines||[]); });
+  else lineas = f.Lines || [];
+
+  var nQty = function(q){ q = parseFloat(q)||0; return q % 1 === 0 ? String(q) : q.toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var ab = function(t, l, w, css, txt){ return '<div class="ab" style="top:'+t+'mm;left:'+l+'mm;width:'+w+'mm;'+(css||'')+'">'+(txt==null?'':txt)+'</div>'; };
+
+  // ── Datos de cabecera del documento ──
+  var nOp = f.OperationNumber || f.TicketNumber || f.NumOperation || f.BasicNumber || '';
+  var refDoc = (nOp ? nOp + '/' : '') + (f.Serie || '') + '-' + (f.Number != null ? f.Number : '');
+  var atendido = f.UserName || f.User || f.Waiter || '';
+  var mesa = f.LocationName || f.Location || f.Table || f.PriceListName || '';
+  var pdv = f.PosName || f.Pos || f.SalePoint || f.Workplace || '';
+  var nombreCli = c.FiscalName || c.BusinessName || '';
+  var cifCli = c.Cif || c.Nif || '';
+  var dirCli = [ (c.Street || c.Address || ''),
+                 ((c.ZipCode || c.PostalCode || '') + (c.City ? ' ' + c.City : '')).trim(),
+                 (c.Region || c.Province || '') ].filter(Boolean).join(' - ');
+  var telCli = c.Phone || c.MobilePhone || c.Telephone || '';
+  var tipoDoc = (f.Serie || '').indexOf('FD') === 0 || (f.Totals && f.Totals.GrossAmount < 0) ? 'FACTURA RECTIFICATIVA' : 'FACTURA';
+
+  // ── Líneas e IVAs (agrupados por tipo, como Ágora) ──
+  var hayDescuento = lineas.some(function(l){ return parseFloat(l.DiscountRate||0) > 0; });
+  var grupos = {};   // rate% → gross
+  lineas.forEach(function(l){
+    var r = parseFloat(l.VatRate != null ? l.VatRate : 0.21); if (r > 1.999) r = r/100;
+    var imp = parseFloat(l.TotalAmount != null ? l.TotalAmount : (parseFloat(l.Quantity||0)*parseFloat(l.UnitPrice||0)));
+    grupos[r] = (grupos[r]||0) + imp;
+  });
+  var totalG = f.Totals ? parseFloat(f.Totals.GrossAmount) : Object.keys(grupos).reduce(function(s,r){return s+grupos[r];},0);
+  var rates = Object.keys(grupos).sort();
+  var ivaRows = rates.map(function(r){
+    var g = grupos[r], rr = parseFloat(r);
+    var b = g/(1+rr), q = g-b;
+    return { pct: (rr*100).toLocaleString('es-ES',{minimumFractionDigits:3,maximumFractionDigits:3})+'%', base: b, cuota: q, total: g };
+  });
+  // con un solo tipo de IVA, mandan los totales OFICIALES de Ágora (cuadre al céntimo)
+  if (ivaRows.length === 1 && f.Totals) { ivaRows[0].base = parseFloat(f.Totals.NetAmount); ivaRows[0].cuota = parseFloat(f.Totals.VatAmount); ivaRows[0].total = totalG; }
+  var baseT = ivaRows.reduce(function(s,x){return s+x.base;},0), cuotaT = ivaRows.reduce(function(s,x){return s+x.cuota;},0);
+  var pagos = (f.Payments||[]).slice(0,5), entregado = pagos.reduce(function(s,p){return s+(parseFloat(p.Amount)||0);},0);
+  var cambio = Math.max(0, Math.round((entregado-totalG)*100)/100);
+
+  // ── Columnas de la tabla (medidas reales del PDF; con descuento, anchos del RDLC) ──
+  // sin dto:  x: 9.9|33.9|42.5|145.9|171.3  → fin 199.9   (Cantidad | iva | Producto | Precio | Importe)
+  // con dto:  x: 9.9|29.1|34.1|104.1|129.0|159.8|177.8 (RDLC cm→mm)
+  var COLS = hayDescuento
+    ? [ {x:9.9,w:19.2,a:'right',h:'Cantidad'}, {x:29.1,w:5,a:'right',h:''}, {x:34.1,w:70,a:'left',h:'Producto'},
+        {x:104.1,w:24.8,a:'right',h:'Precio'}, {x:129,w:30.9,a:'right',h:'Dto.'}, {x:159.8,w:18,a:'right',h:'Dto. €'}, {x:177.8,w:22.1,a:'right',h:'Importe'} ]
+    : [ {x:9.9,w:24,a:'right',h:'Cantidad'}, {x:33.9,w:8.6,a:'right',h:''}, {x:42.5,w:103.4,a:'left',h:'Producto'},
+        {x:145.9,w:25.4,a:'right',h:'Precio'}, {x:171.3,w:28.6,a:'right',h:'Importe'} ];
+  var celda = function(col, txt){ return '<div style="position:absolute;left:'+(col.x-9.9)+'mm;width:'+col.w+'mm;top:0;padding:0 0.8mm;box-sizing:border-box;text-align:'+col.a+';overflow:hidden;white-space:nowrap">'+txt+'</div>'; };
+  var filaCeldas = function(l){
+    var qty = nQty(l.Quantity), nom = (l.ProductName||l.SaleFormatName||'') + (l.Notes ? ' - ' + l.Notes : '');
+    var pu = fmC(l.UnitPrice), dtoR = parseFloat(l.DiscountRate||0);
+    var imp = fmC(l.TotalAmount != null ? l.TotalAmount : (parseFloat(l.Quantity||0)*parseFloat(l.UnitPrice||0)));
+    if (hayDescuento) {
+      var dtoTxt = dtoR > 0 ? (dtoR*100).toLocaleString('es-ES',{maximumFractionDigits:2})+' %' : '';
+      var dtoImp = dtoR > 0 ? fmC(parseFloat(l.Quantity||0)*parseFloat(l.UnitPrice||0)*dtoR) : '';
+      return celda(COLS[0],qty)+celda(COLS[1],'')+celda(COLS[2],nom)+celda(COLS[3],pu)+celda(COLS[4],dtoTxt)+celda(COLS[5],dtoImp)+celda(COLS[6],imp);
+    }
+    return celda(COLS[0],qty)+celda(COLS[1],'')+celda(COLS[2],nom)+celda(COLS[3],pu)+celda(COLS[4],imp);
+  };
+
+  // ── Paginación: filas de 4,8mm entre y=94,8 y y=175,6 → 16 líneas por página ──
+  var POR_PAG = 16;
+  var paginas = [];
+  for (var i = 0; i < Math.max(1, lineas.length); i += POR_PAG) paginas.push(lineas.slice(i, i+POR_PAG));
+  var totPag = paginas.length;
+
+  // ── Bloques fijos (cabecera de página: imagen + caja FACTURA + cliente) ──
+  var cabPagina = function(numPag){
+    var h = '<img src="'+CABECERA_FACTURA_URL+'" style="position:absolute;top:11.2mm;left:11.5mm;width:191.6mm;height:39.4mm" alt=""/>';
+    h += '<div class="ab" style="top:52.8mm;left:9.9mm;width:190.2mm;height:31.7mm;border:0.3mm solid #000"></div>';
+    h += ab(53.6, 9.9, 190.2, 'text-align:center;font-size:12pt;font-weight:bold', tipoDoc);
+    h += ab(61.5, 11.6, 19, '', 'Nº Op.:') + ab(61.5, 31.6, 42, 'font-weight:bold', refDoc);
+    h += ab(61.5, 76.1, 21, '', 'Atendido por:') + ab(61.5, 99, 40, '', atendido);
+    h += ab(61.5, 141.6, 28, '', 'Punto de Venta:') + ab(61.5, 160, 39.4, 'text-align:right', pdv);
+    h += ab(66.4, 11.6, 19, '', 'Fecha:') + ab(66.4, 31.6, 42, 'font-weight:bold', fdC(f.Date));
+    h += ab(66.4, 76.1, 21, 'text-align:right', 'Mesa:') + ab(66.4, 99, 40, '', mesa);
+    h += ab(66.4, 160, 39.4, 'text-align:right', numPag + '/' + totPag);
+    h += ab(71, 11.6, 19, '', 'Cliente:') + ab(71, 31.6, 105, 'font-weight:bold', nombreCli);
+    h += ab(71, 141.6, 22, '', 'Télefono:') + ab(71, 165.6, 34, 'font-weight:bold', telCli);
+    h += ab(75.8, 31.6, 105, 'font-weight:bold', cifCli);
+    h += ab(80.6, 31.6, 168, '', dirCli);
+    // cabecera de la tabla de productos (Gainsboro, 9pt bold, recuadro negro)
+    h += '<div class="ab" style="top:87.8mm;left:9.9mm;width:190.2mm;height:7mm;background:#dcdcdc;border:0.3mm solid #000"></div>';
+    h += COLS.map(function(col){ return '<div class="ab" style="top:89.2mm;left:'+col.x+'mm;width:'+col.w+'mm;padding:0 0.8mm;box-sizing:border-box;text-align:'+col.a+';font-size:9pt;font-weight:bold">'+col.h+'</div>'; }).join('');
+    return h;
+  };
+
+  // ── Pie de la ÚLTIMA página: banda gris, impuestos, pagos, LOPD e IBAN ──
+  var pieFinal = function(){
+    var h = '<div class="ab" style="top:175.6mm;left:9.9mm;width:190.2mm;height:43.9mm;border:0.3mm solid #000"></div>';
+    h += '<div class="ab" style="top:177mm;left:10mm;width:190mm;height:7mm;background:#dcdcdc"></div>';
+    h += ab(179.1, 10, 187.6, 'text-align:right;font-weight:bold', 'Total (Impuestos Incl.) ' + fmC(totalG));
+    h += ab(188.9, 11.6, 19, 'font-weight:bold', 'Impuesto') + ab(188.9, 30, 20, 'text-align:right;font-weight:bold', 'Base') +
+         ab(188.9, 50.5, 18, 'text-align:right;font-weight:bold', 'Cuota') + ab(188.9, 99.5, 20, 'text-align:right;font-weight:bold', 'Total');
+    h += ab(188.9, 122.4, 22, 'font-weight:bold', 'Entregado:') + ab(188.9, 134, 24.7, 'text-align:right;font-weight:bold', fmC(entregado)) +
+         ab(188.9, 165.6, 16, 'font-weight:bold', 'Cambio:') + ab(188.9, 175, 24.4, 'text-align:right;font-weight:bold', fmC(cambio));
+    ivaRows.slice(0,5).forEach(function(x, i){
+      var y = 193.8 + i*4;
+      h += ab(y, 11.6, 19, '', x.pct) + ab(y, 30, 20, 'text-align:right', fmC(x.base)) +
+           ab(y, 50.5, 18, 'text-align:right', fmC(x.cuota)) + ab(y, 99.5, 20, 'text-align:right', fmC(x.total));
+    });
+    pagos.forEach(function(p, i){
+      var y = 193.8 + i*4;
+      h += ab(y, 122.5, 47, 'overflow:hidden;white-space:nowrap', String(p.MethodName||'').slice(0,28)) +
+           ab(y, 175, 24.4, 'text-align:right', fmC(p.Amount));
+    });
+    h += ab(214.6, 11.6, 19, 'font-weight:bold', 'Total:') + ab(214.6, 30, 20, 'text-align:right', fmC(baseT)) +
+         ab(214.6, 50.5, 18, 'text-align:right', fmC(cuotaT)) + ab(214.6, 99.5, 20, 'text-align:right', fmC(totalG));
+    // Letra legal (texto y partición de líneas EXACTOS del original)
+    var lopd = ['De conformidad con la Ley Orgánica 15/1999, le informamos que sus datos se hallan incorporados a un fichero titularidad de JS Technology Menorca, S.L con la finalidad de',
+      'prestar sus servicios profesionales. Igualmente informamos que podrá ejercer los derechos de acceso, rectificación, cancelación y oposición establecidos en dicha Ley a través',
+      'de la dirección: Av. Fort de L´Eau, 48 bajos 3 07702 – Maó - En caso de que el adquirente de los productos incluidos en la presente factura actúe como consumidor final, tiene',
+      'derecho a solicitar a la entidad gestora creada al efecto el reembolso del importe abonado en concepto de compensación por copia privada, siempre y cuando cumpla los',
+      'requisitos previstos en el artículo 25.8 del texto refundido de la Ley de Propiedad Intelectual'];
+    lopd.forEach(function(t, i){ h += ab(221.7 + i*2.55, 9.9, 190.2, 'font-size:6pt;white-space:nowrap;overflow:hidden', t); });
+    h += ab(236.7, 21.5, 178, 'font-size:9pt;font-weight:bold', 'Puede realizar el pago mediante transferencia bancaria al siguiente número de cuenta IBAN:');
+    h += ab(241.6, 22.1, 178, 'font-size:9pt;font-weight:bold', 'ES3500810232340001434454');
+    return h;
+  };
+
+  // ── Montaje de páginas ──
+  var cuerpo = paginas.map(function(chunk, p){
+    var filas = chunk.map(function(l, i){
+      return '<div style="position:absolute;top:'+(94.8 + i*4.8)+'mm;left:9.9mm;width:190.2mm;height:4.8mm;line-height:4.8mm;background:'+(i % 2 ? '#eeeeee' : '#ffffff')+'">'+filaCeldas(l)+'</div>';
+    }).join('');
+    return '<div class="page">' + cabPagina(p+1) + filas + (p === totPag-1 ? pieFinal() : '') + '</div>';
+  }).join('');
+
+  return '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>'+tipoDoc+' '+(f.Serie||'')+'-'+(f.Number!=null?f.Number:'')+'</title><style>'+
+    '*{margin:0;padding:0;box-sizing:border-box}'+
+    'body{background:#fff;font-family:Verdana,Geneva,sans-serif;color:#000}'+
+    '.page{position:relative;width:210mm;height:297mm;margin:0 auto;background:#fff;overflow:hidden;page-break-after:always;font-size:8pt}'+
+    '.page:last-child{page-break-after:auto}'+
+    '.ab{position:absolute;line-height:1.25}'+
+    '@media print{body{margin:0}.no-print{display:none!important}}'+
+    '</style></head><body>'+cuerpo+'</body></html>';
+}
+function generarHTMLFactura_ANTIGUA_v1(f) {  // ← SUSTITUIDA por la réplica exacta de Ágora (arriba). Conservada solo como referencia.
   var c = f.Customer || {};
   var notas = f.Notes || '';
   var centroM = notas.match(/Centro: *([^|]+)/i);
