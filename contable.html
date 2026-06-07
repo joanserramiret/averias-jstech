@@ -2718,11 +2718,17 @@ function generarHTMLFactura(f) {
   var ab = function(t, l, w, css, txt){ return '<div class="ab" style="top:'+t+'mm;left:'+l+'mm;width:'+w+'mm;'+(css||'')+'">'+(txt==null?'':txt)+'</div>'; };
 
   // ── Datos de cabecera del documento ──
-  var nOp = f.OperationNumber || f.TicketNumber || f.NumOperation || f.BasicNumber || '';
+  // Ágora a veces da estos campos como OBJETO {Id, Name} y a veces como texto → siempre el nombre
+  var nom = function(v){
+    if (v == null) return '';
+    if (typeof v === 'object') return v.Name || v.name || v.UserName || v.Description || '';
+    return String(v);
+  };
+  var nOp = nom(f.OperationNumber) || nom(f.TicketNumber) || nom(f.NumOperation) || nom(f.BasicNumber) || '';
   var refDoc = (nOp ? nOp + '/' : '') + (f.Serie || '') + '-' + (f.Number != null ? f.Number : '');
-  var atendido = f.UserName || f.User || f.Waiter || '';
-  var mesa = f.LocationName || f.Location || f.Table || f.PriceListName || '';
-  var pdv = f.PosName || f.Pos || f.SalePoint || f.Workplace || '';
+  var atendido = nom(f.UserName) || nom(f.User) || nom(f.Waiter) || nom(f.Employee) || '';
+  var mesa = nom(f.LocationName) || nom(f.Location) || nom(f.Table) || nom(f.PriceListName) || '';
+  var pdv = nom(f.PosName) || nom(f.Pos) || nom(f.SalePoint) || nom(f.Workplace) || nom(f.Terminal) || 'TPV 1';
   var nombreCli = c.FiscalName || c.BusinessName || '';
   var cifCli = c.Cif || c.Nif || '';
   var dirCli = [ (c.Street || c.Address || ''),
