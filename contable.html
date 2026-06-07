@@ -4349,21 +4349,41 @@ async function remesasImportarPDF(files) {
       return dd >= -4 && dd <= dias;
     });
     const eligeVentana = lista => {
-      for (const dias of [25, 45, 90]) {
-        const v = enVentana(lista, dias);
+      for (const dias of [10, 25, 45, 90]) {                // 10 primero: factura → cobro al día
+        const v = enVentana(lista, dias);                   //  siguiente → abono pocos días después
         if (v.length === 1) return v[0];
         if (v.length > 1) return masCercana(v);
       }
       return null;                                          // fuera de ventana: no se inventa
     };
-    // 🪄 deducción por cliente: NOMBRE FISCAL del deudor obligatorio + ventana de fechas
+    // 🪄 deducción por cliente — calcada al PROCESO REAL de Joan al montar remesas:
+    // facturas de UN día (casi siempre el anterior al cobro), SOLO de Recibo Bancario,
+    // agrupadas por cliente en mandatos (un mandato = una o varias facturas del cliente).
+    // Orden: factura exacta (recibo primero) → DÍA COMPLETO del cliente que sume →
+    // subconjunto del mismo día → mezcla de días (último recurso). Siempre nombre + ventana.
     const magiaCliente = (rec, objetivo) => {
-      const grupo = enVentana(cands.filter(c => !usadasGlob.has(bkNormClave(c.clave)) &&
+      const grupoTodo = enVentana(cands.filter(c => !usadasGlob.has(bkNormClave(c.clave)) &&
         (bkNombreEnConcepto(c.cliente, rec.deudor) || bkNombreEnConcepto(rec.deudor, c.cliente))), 90);
-      if (!grupo.length) return null;
-      const exactas = grupo.filter(c => Math.abs(c.importe - objetivo) < 0.01);
+      if (!grupoTodo.length) return null;
+      const grupoRecibo = grupoTodo.filter(c => c.recibo);
+      const exactasR = grupoRecibo.filter(c => Math.abs(c.importe - objetivo) < 0.01);
+      const exactasT = grupoTodo.filter(c => Math.abs(c.importe - objetivo) < 0.01);
+      const exactas = exactasR.length ? exactasR : exactasT;  // recibo manda; transfer = error humano posible
       if (exactas.length) { const e = eligeVentana(exactas); return e ? [e] : null; }
-      return bkBuscarDesglose(grupo, objetivo);
+      const base = grupoRecibo.length ? grupoRecibo : grupoTodo;
+      const porDia = {};
+      base.forEach(c => { (porDia[c.fecha] = porDia[c.fecha] || []).push(c); });
+      for (const dia of Object.keys(porDia).sort().reverse()) {      // el día más reciente primero
+        const sumaDia = porDia[dia].reduce((s, c) => s + c.importe, 0);
+        if (porDia[dia].length > 1 && Math.abs(sumaDia - objetivo) < 0.01) return porDia[dia];
+      }
+      for (const dia of Object.keys(porDia).sort().reverse()) {
+        if (porDia[dia].length > 1) {
+          const sol = bkBuscarDesglose(porDia[dia], objetivo);
+          if (sol && sol.length > 1) return sol;
+        }
+      }
+      return bkBuscarDesglose(base, objetivo);
     };
     d.recibos.forEach(rec => {
       if (rec.situacion === 'devuelto') devueltos++;
@@ -5013,7 +5033,7 @@ async function remesaDeducir(id) {
     return dd >= -4 && dd <= dias;
   });
   const eligeVentanaD = lista => {
-    for (const dias of [25, 45, 90]) {
+    for (const dias of [10, 25, 45, 90]) {   // 10 primero: factura → cobro al día siguiente
       const v = enVentanaD(lista, dias);
       if (v.length === 1) return v[0];
       if (v.length > 1) return masCercanaD(v);
@@ -5026,9 +5046,27 @@ async function remesaDeducir(id) {
       (bkNombreEnConcepto(c.cliente, f.cliente || '') || bkNombreEnConcepto(f.cliente || '', c.cliente))), 90);
     const exactas = grupo.filter(c => Math.abs(c.importe - (f.importe || 0)) < 0.01);
     const elegida = exactas.length ? eligeVentanaD(exactas) : null;
+    // grupo del cliente: SOLO recibo bancario si los hay (las remesas se montan con ellos),
+    // y primero el MISMO DÍA de factura (regla de Joan), luego mezcla
+    let solDia = null;
+    if (!elegida && !exactas.length) {
+      const baseD = grupo.filter(c => c.recibo).length ? grupo.filter(c => c.recibo) : grupo;
+      const porDia = {};
+      baseD.forEach(c => { (porDia[c.fecha] = porDia[c.fecha] || []).push(c); });
+      for (const dia of Object.keys(porDia).sort().reverse()) {
+        const sumaDia = porDia[dia].reduce((s, c) => s + c.importe, 0);
+        if (porDia[dia].length > 1 && Math.abs(sumaDia - (f.importe || 0)) < 0.01) { solDia = porDia[dia]; break; }
+      }
+      if (!solDia) for (const dia of Object.keys(porDia).sort().reverse()) {
+        if (porDia[dia].length > 1) {
+          const s2 = bkBuscarDesglose(porDia[dia], f.importe || 0);
+          if (s2 && s2.length > 1) { solDia = s2; break; }
+        }
+      }
+    }
     const sol = elegida ? [elegida]
               : exactas.length ? null
-              : bkBuscarDesglose(grupo, f.importe || 0);
+              : solDia || bkBuscarDesglose(grupo, f.importe || 0);
     if (sol && sol.length) {
       sol.forEach(c => { usadas.add(bkNormClave(c.clave)); nuevo.push({ serie: c.serie, numero: c.numero,
         importe: sol.length === 1 ? f.importe : c.importe, cliente: (f.cliente || '') + ' 🪄 deducida (invento)',
