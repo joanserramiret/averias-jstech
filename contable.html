@@ -3586,12 +3586,13 @@ function bkModalRender() {
       '⚠ Propuesta DEDUCIDA por suma de importes (' + cands.length + ' facturas) — un INVENTO hasta que verifiques los nombres · ' +
       '<a onclick="bkSoloSeleccion=false;bkModalRender()" style="cursor:pointer;text-decoration:underline;font-weight:700">ver todas las candidatas</a></div>';
   }
-  // Orden útil: 1º las MARCADAS (que no se pierdan en la inmensidad), 2º las que cuadran
-  // por importe exacto con el movimiento, 3º el resto en su orden de siempre
+  // Orden útil: exactas por importe primero. OJO: ya NO se reordena al marcar
+  // ("seleccionadas primero" hacía SALTAR la lista en cada click y el siguiente
+  // click caía en otra fila → parecía que solo se podía imputar UNA factura).
+  // El orden queda ESTABLE mientras seleccionas; las marcadas se ven por su
+  // fondo azul y el contador de suma de abajo.
   const objetivoOrd = Math.abs(bkMovActual ? bkMovActual.importe : 0);
   cands = cands.slice().sort((a, b) => {
-    const sa = bkSeleccion[a.clave] ? 0 : 1, sb = bkSeleccion[b.clave] ? 0 : 1;
-    if (sa !== sb) return sa - sb;
     const ea = Math.abs((a._restante || a.importe) - objetivoOrd) < 0.005 ? 0 : 1;
     const eb = Math.abs((b._restante || b.importe) - objetivoOrd) < 0.005 ? 0 : 1;
     return ea - eb;
