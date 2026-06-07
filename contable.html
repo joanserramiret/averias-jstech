@@ -4101,19 +4101,24 @@ async function bkRemesas() {
   }
 
   let html = '';
-  // 🚨 Chivato: una misma factura imputada en VARIAS remesas = error (cuotas mensuales mal deducidas)
+  // 🚨 Chivato: una misma factura COBRADA (abonada) en varias remesas = error.
+  // NO cuentan: los recibos '—' sin factura (no son la misma factura), ni los RE-GIROS
+  // legítimos (↩ devuelta en una remesa y abonada en otra posterior = ciclo normal).
   const vecesClave = {};
   remesas.forEach(m => bkClavesDeConciliado(m.conciliado).forEach(([k, f]) => {
     const s = (f.serie || '').toUpperCase();
-    if (s === 'REF' || s === 'GASTOS' || s === 'DESCUADRE') return;
-    (vecesClave[k] = vecesClave[k] || []).push(m.fecha || '¿?');
+    if (s === 'REF' || s === 'GASTOS' || s === 'DESCUADRE' || f.serie === '—' || s === '—') return;
+    if (!String(f.numero == null ? '' : f.numero).trim()) return;  // sin número no es una factura identificable
+    (vecesClave[k] = vecesClave[k] || []).push({ fecha: m.fecha || '¿?', dev: (f.situacion || 'abonado') === 'devuelto' });
   }));
-  const dupsRem = Object.entries(vecesClave).filter(([, v]) => v.length > 1);
+  const dupsRem = Object.entries(vecesClave).filter(([, v]) => v.filter(x => !x.dev).length > 1);
   if (dupsRem.length) {
     html += '<div style="background:#fdf3f3;border:1.5px solid #e0b0b0;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12.5px">' +
-      '<b style="color:#c0392b">🚨 ' + dupsRem.length + ' factura(s) imputadas en VARIAS remesas a la vez</b> — imposible: cada factura se cobra una vez. ' +
-      'Despliega las remesas, deja la del mes correcto y quita las demás con ✕ (luego 🪄 o ➕ para poner la factura que toca):' +
-      dupsRem.slice(0, 10).map(([k, v]) => '<div style="margin-top:4px">· <b>' + k + '</b> en ' + v.length + ' remesas (' + v.sort().join(', ') + ')</div>').join('') +
+      '<b style="color:#c0392b">🚨 ' + dupsRem.length + ' factura(s) ABONADAS en varias remesas a la vez</b> — imposible: cada factura se cobra una vez (los re-giros ↩→abonada no cuentan, son el ciclo normal). ' +
+      'Despliega las remesas, deja la correcta y quita las demás con ✕ (luego 🪄 o ➕ para poner la que toca):' +
+      dupsRem.slice(0, 10).map(([k, v]) => '<div style="margin-top:4px">· <b>' + k + '</b> abonada en: ' +
+        v.filter(x => !x.dev).map(x => x.fecha).sort().join(', ') +
+        (v.some(x => x.dev) ? ' <span style="color:#888">(y ↩ devuelta en: ' + v.filter(x => x.dev).map(x => x.fecha).sort().join(', ') + ' — eso es correcto)</span>' : '') + '</div>').join('') +
       (dupsRem.length > 10 ? '<div style="color:#888;margin-top:4px">…y ' + (dupsRem.length - 10) + ' más</div>' : '') + '</div>';
   }
   if (remesas.length) {
