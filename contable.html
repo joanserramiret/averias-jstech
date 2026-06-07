@@ -4119,7 +4119,8 @@ async function bkRemesas() {
       dupsRem.slice(0, 10).map(([k, v]) => '<div style="margin-top:4px">· <b>' + k + '</b> abonada en: ' +
         v.filter(x => !x.dev).map(x => x.fecha).sort().join(', ') +
         (v.some(x => x.dev) ? ' <span style="color:#888">(y ↩ devuelta en: ' + v.filter(x => x.dev).map(x => x.fecha).sort().join(', ') + ' — eso es correcto)</span>' : '') + '</div>').join('') +
-      (dupsRem.length > 10 ? '<div style="color:#888;margin-top:4px">…y ' + (dupsRem.length - 10) + ' más</div>' : '') + '</div>';
+      (dupsRem.length > 10 ? '<div style="color:#888;margin-top:4px">…y ' + (dupsRem.length - 10) + ' más</div>' : '') +
+      '<div style="margin-top:8px"><button onclick="remesaDesdesglosarConflictivas()" title="Quita estas facturas de TODAS las remesas donde figuran abonadas (las ↩ devueltas se conservan). El resto de cada desglose no se toca — luego pones la buena con ➕/✎ o re-importas el 📎" style="padding:6px 14px;background:#c0392b;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🧹 Desdesglosar SOLO las conflictivas</button></div></div>';
   }
   if (remesas.length) {
     const total = remesas.reduce((s, m) => s + m.importe, 0);
@@ -4735,6 +4736,52 @@ function remesaBuscarFactura() {
     : '<div style="background:#fdf3f3;border:1px solid #e0b0b0;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12.5px">' +
       '<b style="color:#c0392b">✗ "' + q.replace(/</g, '&lt;') + '" no aparece en ninguna remesa de las cargadas ni cobrada por otra vía</b><br>' +
       '<span style="color:#888">Conclusión: NO se ha negociado (o su remesa no está importada — si es de un período antiguo, importa su N43 y el listado 📎).</span></div>';
+}
+
+// 🧹 DESDESGLOSA SOLO LAS CONFLICTIVAS: quita las facturas ABONADAS en >1 remesa de TODAS
+// las remesas donde figuran (las apariciones ↩ devueltas se conservan: historial del re-giro).
+// El resto de cada desglose queda intacto; las remesas pasan a "quedan X sin explicar".
+async function remesaDesdesglosarConflictivas() {
+  const remesas = bkRemesasDatos.remesas || [];
+  const veces = {};
+  remesas.forEach(m => bkClavesDeConciliado(m.conciliado).forEach(([k, f]) => {
+    const s = (f.serie || '').toUpperCase();
+    if (s === 'REF' || s === 'GASTOS' || s === 'DESCUADRE' || f.serie === '—' || s === '—') return;
+    if (!String(f.numero == null ? '' : f.numero).trim()) return;
+    (veces[k] = veces[k] || []).push({ dev: (f.situacion || 'abonado') === 'devuelto' });
+  }));
+  const conflictivas = new Set(Object.entries(veces).filter(([, v]) => v.filter(x => !x.dev).length > 1).map(([k]) => k));
+  if (!conflictivas.size) { alert('✓ Ahora mismo no hay facturas abonadas en varias remesas.'); return; }
+  if (!confirm('🧹 Voy a QUITAR estas ' + conflictivas.size + ' factura(s) de TODAS las remesas donde figuran ABONADAS:\n\n· ' +
+    Array.from(conflictivas).join('   · ') +
+    '\n\nLas apariciones ↩ DEVUELTAS se conservan (historial del re-giro).\n' +
+    'El resto de cada desglose NO se toca; las remesas afectadas quedarán con importe sin explicar\n' +
+    '— después pon la factura buena con ➕/✎ o re-importa su fichero con 📎.\n\n¿Adelante?')) return;
+  let tocadas = 0, quitadas = 0;
+  for (const m of remesas) {
+    const conc = m.conciliado || [];
+    const nuevo = conc.filter(e => {
+      const s = (e.serie || '').toUpperCase();
+      if (s === 'REF' || s === 'GASTOS' || s === 'DESCUADRE' || e.serie === '—') return true;
+      const k = bkNormClave((e.serie || '') + '-' + (e.numero || ''));
+      if (conflictivas.has(k) && (e.situacion || 'abonado') !== 'devuelto') { quitadas++; return false; }
+      return true;
+    });
+    if (nuevo.length !== conc.length) {
+      try {
+        await fetch(BRIDGE_URL_C + '/banco/conciliar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+          body: JSON.stringify({ id: m.id, facturas: nuevo })
+        });
+        tocadas++;
+      } catch(e) { /* seguir con el resto */ }
+    }
+  }
+  alert('🧹 ' + quitadas + ' imputación(es) conflictiva(s) quitadas de ' + tocadas + ' remesa(s).\n' +
+    'Esas facturas vuelven a Pendiente hasta que las pongas donde tocan (➕/✎/📎).');
+  refrescarEstadosCobro();
+  bkRemesas();
 }
 
 // ✕ Quita UN solo recibo de un desglose, sin tocar el resto (cirugía, no demolición).
