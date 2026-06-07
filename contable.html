@@ -2325,7 +2325,16 @@ async function auditarCartera() {
   const grupos = {};
   (d.pendientes || []).forEach(p => { (grupos[p.pista] = grupos[p.pista] || []).push(p); });
   const remesaVieja = (d.remesas_banco && d.remesas_banco.length) ? d.remesas_banco[0] : null;
-  let html = '<div style="background:#f7f9fd;border:1px solid var(--borde);border-radius:10px;padding:10px 14px;margin-bottom:10px">' +
+  let html = '';
+  // ⚖ Vigilante: anuladas (con FD hermana) que estén conciliadas en algún cobro/remesa = error grave
+  if (d.anuladas_conciliadas && d.anuladas_conciliadas.length) {
+    html += '<div style="background:#fdf3f3;border:1.5px solid #e0b0b0;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12.5px">' +
+      '<b style="color:#c0392b">🚨 ' + d.anuladas_conciliadas.length + ' factura(s) ANULADAS conciliadas en cobros/remesas</b> — una anulada (con su FD hermana) no debería estar cobrada. Revísalas y quítalas con ✕:' +
+      d.anuladas_conciliadas.map(a => '<div style="margin-top:4px">· <b>' + a.clave + '</b> en mov. del ' + (a.fecha || '') + ' (' + (a.banco || '') + '): ' + a.concepto + '…</div>').join('') + '</div>';
+  } else if (d.n_anuladas_detectadas != null) {
+    html += '<div style="background:#e8f7ef;border:1px solid #a7d7b8;border-radius:10px;padding:8px 14px;margin-bottom:10px;font-size:12px;color:#1b7a3d">⚖ ' + d.n_anuladas_detectadas + ' anuladas detectadas (parejas F↔FD) y <b>ninguna</b> conciliada en remesas o cobros ✓</div>';
+  }
+  html += '<div style="background:#f7f9fd;border:1px solid var(--borde);border-radius:10px;padding:10px 14px;margin-bottom:10px">' +
     '<b>' + d.total_pendientes + ' facturas pendientes · ' + bkFmt(d.importe_pendiente) + '</b><br>' +
     'Remesas en el extracto: <b>' + (d.remesas_banco || []).length + '</b> (' +
     (d.remesas_banco || []).filter(r => r.estado.indexOf('desglosada') === 0).length + ' desglosadas)' +
