@@ -2732,7 +2732,6 @@ function generarHTMLFactura(f) {
   var tipoDoc = (f.Serie || '').indexOf('FD') === 0 || (f.Totals && f.Totals.GrossAmount < 0) ? 'FACTURA RECTIFICATIVA' : 'FACTURA';
 
   // ── Líneas e IVAs (agrupados por tipo, como Ágora) ──
-  var hayDescuento = lineas.some(function(l){ return parseFloat(l.DiscountRate||0) > 0; });
   var grupos = {};   // rate% → gross
   lineas.forEach(function(l){
     var r = parseFloat(l.VatRate != null ? l.VatRate : 0.21); if (r > 1.999) r = r/100;
@@ -2752,31 +2751,40 @@ function generarHTMLFactura(f) {
   var pagos = (f.Payments||[]).slice(0,5), entregado = pagos.reduce(function(s,p){return s+(parseFloat(p.Amount)||0);},0);
   var cambio = Math.max(0, Math.round((entregado-totalG)*100)/100);
 
-  // ── Columnas de la tabla (medidas reales del PDF; con descuento, anchos del RDLC) ──
-  // sin dto:  x: 9.9|33.9|42.5|145.9|171.3  → fin 199.9   (Cantidad | iva | Producto | Precio | Importe)
-  // con dto:  x: 9.9|29.1|34.1|104.1|129.0|159.8|177.8 (RDLC cm→mm)
-  var COLS = hayDescuento
-    ? [ {x:9.9,w:19.2,a:'right',h:'Cantidad'}, {x:29.1,w:5,a:'right',h:''}, {x:34.1,w:70,a:'left',h:'Producto'},
-        {x:104.1,w:24.8,a:'right',h:'Precio'}, {x:129,w:30.9,a:'right',h:'Dto.'}, {x:159.8,w:18,a:'right',h:'Dto. €'}, {x:177.8,w:22.1,a:'right',h:'Importe'} ]
-    : [ {x:9.9,w:24,a:'right',h:'Cantidad'}, {x:33.9,w:8.6,a:'right',h:''}, {x:42.5,w:103.4,a:'left',h:'Producto'},
-        {x:145.9,w:25.4,a:'right',h:'Precio'}, {x:171.3,w:28.6,a:'right',h:'Importe'} ];
+  // ── Columnas (medidas reales — con o sin descuentos SIEMPRE las mismas 4: Ágora mete
+  //    el Dto. y las notas como SUBLÍNEAS dentro de la celda Producto, calibrado con F-7917) ──
+  var COLS = [ {x:9.9,w:24,a:'right',h:'Cantidad'}, {x:33.9,w:8.6,a:'right',h:''}, {x:42.5,w:103.4,a:'left',h:'Producto'},
+               {x:145.9,w:25.4,a:'right',h:'Precio'}, {x:171.3,w:28.6,a:'right',h:'Importe'} ];
   var celda = function(col, txt){ return '<div style="position:absolute;left:'+(col.x-9.9)+'mm;width:'+col.w+'mm;top:0;padding:0 0.8mm;box-sizing:border-box;text-align:'+col.a+';overflow:hidden;white-space:nowrap">'+txt+'</div>'; };
-  var filaCeldas = function(l){
-    var qty = nQty(l.Quantity), nom = (l.ProductName||l.SaleFormatName||'') + (l.Notes ? ' - ' + l.Notes : '');
-    var pu = fmC(l.UnitPrice), dtoR = parseFloat(l.DiscountRate||0);
-    var imp = fmC(l.TotalAmount != null ? l.TotalAmount : (parseFloat(l.Quantity||0)*parseFloat(l.UnitPrice||0)));
-    if (hayDescuento) {
-      var dtoTxt = dtoR > 0 ? (dtoR*100).toLocaleString('es-ES',{maximumFractionDigits:2})+' %' : '';
-      var dtoImp = dtoR > 0 ? fmC(parseFloat(l.Quantity||0)*parseFloat(l.UnitPrice||0)*dtoR) : '';
-      return celda(COLS[0],qty)+celda(COLS[1],'')+celda(COLS[2],nom)+celda(COLS[3],pu)+celda(COLS[4],dtoTxt)+celda(COLS[5],dtoImp)+celda(COLS[6],imp);
-    }
-    return celda(COLS[0],qty)+celda(COLS[1],'')+celda(COLS[2],nom)+celda(COLS[3],pu)+celda(COLS[4],imp);
-  };
 
-  // ── Paginación: filas de 4,8mm entre y=94,8 y y=175,6 → 16 líneas por página ──
-  var POR_PAG = 16;
-  var paginas = [];
-  for (var i = 0; i < Math.max(1, lineas.length); i += POR_PAG) paginas.push(lineas.slice(i, i+POR_PAG));
+  // Cada línea de Ágora = un GRUPO visual: fila producto (4,84mm) + nota (interlínea 3,4mm,
+  // arranca en x43,2) + sublínea "Dto. 100,00% (7,25 €)" (arranca en x51,1) — zebra POR GRUPO
+  var FILA = 4.84, NOTA_LH = 3.4;
+  var gruposVis = lineas.map(function(l){
+    var imp = fmC(l.TotalAmount != null ? l.TotalAmount : (parseFloat(l.Quantity||0)*parseFloat(l.UnitPrice||0)));
+    var nota = String(l.Notes || l.AddinsDescription || '').trim();
+    var dr = parseFloat(l.DiscountRate || 0);
+    var notaLineas = nota ? Math.max(1, Math.ceil(nota.length / 62)) : 0;
+    var altura = FILA + (nota ? 1.2 + notaLineas*NOTA_LH : 0) + (dr > 0 ? FILA : 0);
+    var html = '<div style="position:relative;height:'+FILA+'mm;line-height:'+FILA+'mm">' +
+      celda(COLS[0], nQty(l.Quantity)) + celda(COLS[1], '') + celda(COLS[2], (l.ProductName||l.SaleFormatName||'')) +
+      celda(COLS[3], fmC(l.UnitPrice)) + celda(COLS[4], imp) + '</div>';
+    if (nota) html += '<div style="margin-left:33.3mm;width:101.8mm;padding:0.6mm 0.8mm;line-height:'+NOTA_LH+'mm;white-space:normal;box-sizing:border-box">'+nota+'</div>';
+    if (dr > 0) html += '<div style="margin-left:41.2mm;height:'+FILA+'mm;line-height:'+FILA+'mm">Dto. ' +
+      (dr*100).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2}) + '% (' +
+      fmC(parseFloat(l.Quantity||0)*parseFloat(l.UnitPrice||0)*dr) + ')</div>';
+    return { html: html, altura: altura };
+  });
+
+  // ── Paginación por ALTURA disponible (94,8 → 175,6 = 80,8mm por página) ──
+  var PRESUP = 80.8;
+  var paginas = [[]];
+  var usadoPag = 0;
+  gruposVis.forEach(function(g){
+    if (usadoPag + g.altura > PRESUP && paginas[paginas.length-1].length) { paginas.push([]); usadoPag = 0; }
+    paginas[paginas.length-1].push(g);
+    usadoPag += g.altura;
+  });
   var totPag = paginas.length;
 
   // ── Bloques fijos (cabecera de página: imagen + caja FACTURA + cliente) ──
@@ -2833,12 +2841,16 @@ function generarHTMLFactura(f) {
     return h;
   };
 
-  // ── Montaje de páginas ──
+  // ── Montaje de páginas (zebra continua entre páginas, como RowNumber en Ágora) ──
+  var idxGlobal = 0;
   var cuerpo = paginas.map(function(chunk, p){
-    var filas = chunk.map(function(l, i){
-      return '<div style="position:absolute;top:'+(94.8 + i*4.8)+'mm;left:9.9mm;width:190.2mm;height:4.8mm;line-height:4.8mm;background:'+(i % 2 ? '#eeeeee' : '#ffffff')+'">'+filaCeldas(l)+'</div>';
+    var filas = chunk.map(function(g){
+      var bg = (idxGlobal++ % 2) ? '#eeeeee' : '#ffffff';
+      return '<div style="background:' + bg + '">' + g.html + '</div>';
     }).join('');
-    return '<div class="page">' + cabPagina(p+1) + filas + (p === totPag-1 ? pieFinal() : '') + '</div>';
+    return '<div class="page">' + cabPagina(p+1) +
+      '<div class="ab" style="top:94.8mm;left:9.9mm;width:190.2mm">' + filas + '</div>' +
+      (p === totPag-1 ? pieFinal() : '') + '</div>';
   }).join('');
 
   return '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>'+tipoDoc+' '+(f.Serie||'')+'-'+(f.Number!=null?f.Number:'')+'</title><style>'+
