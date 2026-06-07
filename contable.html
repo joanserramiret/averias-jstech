@@ -4189,12 +4189,19 @@ async function remesaProponerCuadre(id) {
   const m = (bkRemesasDatos.remesas || []).find(x => x.id === id);
   if (!m) { alert('No encuentro la remesa — recarga con ⟳.'); return; }
 
-  // Facturas ya usadas en cualquier conciliación
-  let usadas = new Set();
+  // Facturas ya imputadas en cualquier conciliación — claves NORMALIZADAS y grupos REF
+  // expandidos (sin esto, F-007490 ≡ F-7490 se colaba), guardando DÓNDE está cada una
+  let imputadas = {};
   try {
     const r = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
-    ((await r.json()).movimientos || []).forEach(x => (x.conciliado || []).forEach(f => usadas.add(f.serie + '-' + f.numero)));
+    ((await r.json()).movimientos || []).forEach(x => {
+      if (x.id === id) return;
+      bkClavesDeConciliado(x.conciliado).forEach(([k]) => {
+        if (!imputadas[k]) imputadas[k] = { fecha: x.fecha, concepto: (x.concepto || '').slice(0, 45) };
+      });
+    });
   } catch(e) { alert('Error: ' + e.message); return; }
+  const usadas = { has: c => !!imputadas[bkNormClave(c)] };
 
   // Ventanas escalonadas según el hábito real: la remesa se monta el mismo día de facturar
   // o hasta ~15 días después (+ ~6 días hasta el abono) → primero 25 días; si no cuadra,
@@ -4220,9 +4227,15 @@ async function remesaProponerCuadre(id) {
   const noRecibo = bkCandidatos({ importe: 1 }).filter(c =>
     !c.recibo && !usadas.has(c.clave) && c.fecha && c.fecha <= m.fecha &&
     !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || ''));
-  const pool = todosRecibo.concat(noRecibo).sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+  // Las YA IMPUTADAS en otra remesa/cobro: se MUESTRAN al final con aviso 🔒 (no se ocultan),
+  // para que se vea que existen y dónde están — pero no se pueden marcar (evita duplicarlas)
+  const ocupadas = bkCandidatos({ importe: 1 }).filter(c =>
+    imputadas[bkNormClave(c.clave)] && c.fecha && c.fecha <= m.fecha &&
+    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || ''))
+    .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+  const pool = todosRecibo.concat(noRecibo).sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')).concat(ocupadas);
   remCuadre = { id: id, objetivo: m.importe, fecha: m.fecha, pool: pool, sel: {},
-                noRecibo: new Set(noRecibo.map(c => c.clave)) };
+                noRecibo: new Set(noRecibo.map(c => c.clave)), imputadas: imputadas };
   (sol || []).forEach(c => { remCuadre.sel[c.clave] = c; });
   remCuadreAbrir(sol ? ventanaUsada : 0);
 }
@@ -4310,6 +4323,16 @@ function remCuadreRender() {
   document.getElementById('remc-lista').innerHTML = lista.slice(0, 250).map(c => {
     const sel = !!remCuadre.sel[c.clave];
     const esTransfer = remCuadre.noRecibo.has(c.clave);
+    const imp = remCuadre.imputadas && remCuadre.imputadas[bkNormClave(c.clave)];
+    if (imp) {
+      // YA imputada en otro sitio: visible con aviso, pero con candado (no marcable)
+      return '<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #f3f3f3;background:#fafafa;opacity:.8">' +
+        '<span style="width:13px;text-align:center">🔒</span>' +
+        '<span style="flex:1;font-size:12.5px"><b>' + c.clave + '</b> · ' + c.fecha +
+        ' <span style="color:#c0392b;font-size:10.5px;font-weight:700">⚠ ya imputada: ' + (imp.fecha || '') + ' · ' + imp.concepto + '…</span>' +
+        '<br><span style="color:#888">' + (c.cliente || '') + ' — si pertenece a ESTA remesa, quítala antes de la otra con ✕</span></span>' +
+        '<b style="font-size:12.5px;color:#aaa">' + bkFmt(c.importe) + '</b></div>';
+    }
     return '<label style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #f3f3f3;cursor:pointer;background:' + (sel ? '#eef4ff' : '#fff') + '">' +
       '<input type="checkbox" ' + (sel ? 'checked' : '') + ' onchange="remCuadreToggle(\'' + c.clave.replace(/'/g, "\\'") + '\')" style="width:auto"/>' +
       '<span style="flex:1;font-size:12.5px"><b>' + c.clave + '</b> · ' + c.fecha +
