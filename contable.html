@@ -3668,8 +3668,10 @@ let bkSoloSeleccion = false;  // tras una propuesta, el modal muestra solo lo pr
 
 function bkDesgloseModal() {
   if (!bkMovActual) return;
+  calcularAnuladas();  // ⚖ las anuladas (con FD hermana) jamás entran en la propuesta
   const usadas = new Set(Object.keys(bkSeleccion));
-  const base = bkCandidatos(bkMovActual).filter(c => !usadas.has(bkNormClave(c.clave)));
+  const base = bkCandidatos(bkMovActual).filter(c => !usadas.has(bkNormClave(c.clave)) &&
+    !fcAnuladas.has(bkNormClave(c.clave)));
   const objetivo = Math.abs(bkMovActual.importe) - Object.values(bkSeleccion).reduce((s, c) => s + c.importe, 0);
   // Mismas rejas que el 🧮 de Remesas: solo facturas reales cobradas por Recibo Bancario,
   // y ventanas de fecha crecientes (25 → 45 → 90 días antes del abono)
@@ -3881,6 +3883,7 @@ async function bkAutoconciliar() {
   }
 
   btn.disabled = true;
+  calcularAnuladas();  // ⚖ las anuladas (con FD hermana) jamás se sugieren
   bkSugerencias = [];
   let dudosos = 0;
   for (const m of pendientes) {
@@ -3892,7 +3895,8 @@ async function bkAutoconciliar() {
     // Si el concepto no trae nombre reconocible, NO se sugiere nada (a mano con 🔗).
     // El importe ya NO basta: era la fuente de los inventos (mismo importe, cliente distinto).
     const libres = (esDevol ? bkCandidatos(m) : bkCandidatos(m).filter(c => !usadas.has(bkNormClave(c.clave))))
-      .filter(c => bkNombreEnConcepto(c.cliente, m.concepto));
+      .filter(c => bkNombreEnConcepto(c.cliente, m.concepto) &&
+                   !fcAnuladas.has(bkNormClave(c.clave)));  // ⚖ anuladas (FD hermana): jamás sugeridas
     const matches = libres.filter(c => Math.abs(c.importe - objetivo) < 0.01);
     let facturasElegidas = null;
     if (matches.length === 1) {
@@ -4224,7 +4228,9 @@ async function remesasImportarPDF(files) {
     const r = await fetch(BRIDGE_URL_C + '/banco/movimientos', { headers: { 'ngrok-skip-browser-warning': 'true' } });
     movs = (await r.json()).movimientos || [];
   } catch(e) { alert('Error consultando el banco: ' + e.message); return; }
-  const cands = bkCandidatos({ importe: 1 });  // facturas de venta cargadas (si las hay)
+  calcularAnuladas();  // ⚖ las anuladas (con FD hermana) jamás se deducen por magia
+  const candsTodos = bkCandidatos({ importe: 1 });  // para las referencias EXPLÍCITAS del fichero (el banco manda)
+  const cands = candsTodos.filter(c => !fcAnuladas.has(bkNormClave(c.clave)));  // para deducciones 🪄: sin anuladas
   // Facturas YA imputadas en cualquier movimiento — GLOBAL y compartido entre ficheros:
   // sin esto, los clientes de cuota mensual (mismo importe cada mes, caso Sergi Yglesias)
   // acababan con LA MISMA factura deducida en tres remesas distintas.
@@ -4334,7 +4340,7 @@ async function remesasImportarPDF(files) {
       if (rec.situacion === 'devuelto') devueltos++;
       // 1) El fichero trae referencias de factura (Sabadell TXT / Bankinter TXT)
       if (rec.facturas && rec.facturas.length) {
-        const halladas = rec.facturas.map(ref => cands.find(x => bkNormClave(x.clave) === bkNormClave(ref))).filter(Boolean);
+        const halladas = rec.facturas.map(ref => candsTodos.find(x => bkNormClave(x.clave) === bkNormClave(ref))).filter(Boolean);
         halladas.forEach(c => { usadasGlob.add(bkNormClave(c.clave)); entradas.push({ serie: c.serie, numero: c.numero,
           importe: halladas.length === 1 && rec.facturas.length === 1 ? rec.importe : c.importe,
           cliente: rec.deudor, situacion: rec.situacion }); });
@@ -4426,6 +4432,9 @@ async function remesaProponerCuadre(id) {
     });
   } catch(e) { alert('Error: ' + e.message); return; }
   const usadas = { has: c => !!imputadas[bkNormClave(c)] };
+  // ⚖ REGLA SAGRADA (Joan): las facturas ANULADAS (con su FD hermana, normalmente del
+  // mismo día e importe) NUNCA aparecen en la propuesta de cuadre — ni marcables ni listadas
+  calcularAnuladas();
 
   // Ventanas escalonadas según el hábito real: la remesa se monta el mismo día de facturar
   // o hasta ~15 días después (+ ~6 días hasta el abono) → primero 25 días; si no cuadra,
@@ -4433,7 +4442,8 @@ async function remesaProponerCuadre(id) {
   // SOLO facturas de verdad (fuera tickets y devoluciones) cobradas íntegramente por Recibo Bancario
   const todosRecibo = bkCandidatos({ importe: 1 }).filter(c =>
     c.recibo && !usadas.has(c.clave) && c.fecha && c.fecha <= m.fecha &&
-    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || ''));
+    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || '') &&
+    !fcAnuladas.has(bkNormClave(c.clave)));
   if (!todosRecibo.length) {
     alert('No hay facturas cobradas por Recibo Bancario anteriores al abono.\n¿Has cargado ese período en la pestaña Facturas?');
     return;
@@ -4450,12 +4460,14 @@ async function remesaProponerCuadre(id) {
   // Ágora — el error humano PUEDE), recibos primero, ordenadas por cercanía a la remesa
   const noRecibo = bkCandidatos({ importe: 1 }).filter(c =>
     !c.recibo && !usadas.has(c.clave) && c.fecha && c.fecha <= m.fecha &&
-    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || ''));
+    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || '') &&
+    !fcAnuladas.has(bkNormClave(c.clave)));
   // Las YA IMPUTADAS en otra remesa/cobro: se MUESTRAN al final con aviso 🔒 (no se ocultan),
   // para que se vea que existen y dónde están — pero no se pueden marcar (evita duplicarlas)
   const ocupadas = bkCandidatos({ importe: 1 }).filter(c =>
     imputadas[bkNormClave(c.clave)] && c.fecha && c.fecha <= m.fecha &&
-    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || ''))
+    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || '') &&
+    !fcAnuladas.has(bkNormClave(c.clave)))
     .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
   const pool = todosRecibo.concat(noRecibo).sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')).concat(ocupadas);
   remCuadre = { id: id, objetivo: m.importe, fecha: m.fecha, pool: pool, sel: {},
@@ -4906,8 +4918,10 @@ async function remesaDeducir(id) {
     });
   } catch(e) { alert('✗ ' + e.message); return; }
   bkClavesDeConciliado(m.conciliado).forEach(([k]) => usadas.add(k));  // las ya asignadas aquí tampoco
+  calcularAnuladas();  // ⚖ las anuladas (con FD hermana) jamás se deducen
   const cands = bkCandidatos({ importe: 1 }).filter(c => !usadas.has(bkNormClave(c.clave)) &&
-    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || ''));
+    !/^(T|TD|D|FD|APPFD)$/i.test(c.serie || '') &&
+    !fcAnuladas.has(bkNormClave(c.clave)));
   let resueltas = 0, sinResolver = [];
   const nuevo = [];
   // Desempate por fecha (cuotas mensuales del mismo importe): la más cercana ANTERIOR a la remesa
