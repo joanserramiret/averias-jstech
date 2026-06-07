@@ -4327,22 +4327,36 @@ async function remesasImportarPDF(files) {
 
     const entradas = [];
     let conFactura = 0, devueltos = 0;
-    // Desempate por FECHA: entre varias facturas del mismo importe (cuota mensual),
-    // la de la remesa es la más cercana ANTERIOR a su fecha de abono
+    // ══ DOCTRINA DEL IMPORTADOR (Joan): NOMBRE FISCAL obligatorio + FECHAS inapelables ══
+    // La remesa se pasa el mismo día de facturar o pocos días después → la deducción SOLO
+    // busca en ventanas escalonadas (25 → 45 → 90 días antes del abono, +4 de margen para
+    // remesas presentadas justo antes de emitir, caso 31/12→02/01). Fuera de ventana, NADA.
     const fechaRem = d.fecha_abono || mov.fecha || '';
     const masCercana = lista => lista.slice().sort((a, b) => {
       const va = a.fecha && fechaRem ? Math.abs(new Date(fechaRem) - new Date(a.fecha)) + (a.fecha > fechaRem ? 1e12 : 0) : 9e15;
       const vb = b.fecha && fechaRem ? Math.abs(new Date(fechaRem) - new Date(b.fecha)) + (b.fecha > fechaRem ? 1e12 : 0) : 9e15;
       return va - vb;
     })[0];
-    // 🪄 deducción por cliente: facturas del deudor (por nombre) que sumen el importe del recibo
+    const enVentana = (lista, dias) => lista.filter(c => {
+      if (!c.fecha || !fechaRem) return false;             // sin fecha conocida no hay deducción fiable
+      const dd = (new Date(fechaRem) - new Date(c.fecha)) / 86400000;
+      return dd >= -4 && dd <= dias;
+    });
+    const eligeVentana = lista => {
+      for (const dias of [25, 45, 90]) {
+        const v = enVentana(lista, dias);
+        if (v.length === 1) return v[0];
+        if (v.length > 1) return masCercana(v);
+      }
+      return null;                                          // fuera de ventana: no se inventa
+    };
+    // 🪄 deducción por cliente: NOMBRE FISCAL del deudor obligatorio + ventana de fechas
     const magiaCliente = (rec, objetivo) => {
-      const grupo = cands.filter(c => !usadasGlob.has(bkNormClave(c.clave)) &&
-        (bkNombreEnConcepto(c.cliente, rec.deudor) || bkNombreEnConcepto(rec.deudor, c.cliente)));
+      const grupo = enVentana(cands.filter(c => !usadasGlob.has(bkNormClave(c.clave)) &&
+        (bkNombreEnConcepto(c.cliente, rec.deudor) || bkNombreEnConcepto(rec.deudor, c.cliente))), 90);
       if (!grupo.length) return null;
       const exactas = grupo.filter(c => Math.abs(c.importe - objetivo) < 0.01);
-      if (exactas.length === 1) return [exactas[0]];
-      if (exactas.length > 1) return [masCercana(exactas)];  // la cuota del MES de la remesa
+      if (exactas.length) { const e = eligeVentana(exactas); return e ? [e] : null; }
       return bkBuscarDesglose(grupo, objetivo);
     };
     d.recibos.forEach(rec => {
@@ -4373,12 +4387,12 @@ async function remesasImportarPDF(files) {
         }
         return;
       }
-      // 2) Sin referencias (PDF Bankinter/Sabadell): nombre + importe exacto (si hay varias
-      //    del mismo importe — cuota mensual — gana la más cercana anterior a la remesa)
+      // 2) Sin referencias (PDF Bankinter/Sabadell): NOMBRE FISCAL + importe exacto,
+      //    SIEMPRE dentro de la ventana de fechas (la remesa llega a los pocos días de facturar)
       const m1 = cands.filter(c => !usadasGlob.has(bkNormClave(c.clave)) && Math.abs(c.importe - rec.importe) < 0.01 &&
         (bkNombreEnConcepto(c.cliente, rec.deudor) || bkNombreEnConcepto(rec.deudor, c.cliente)));
-      if (m1.length) {
-        const elegido = m1.length === 1 ? m1[0] : masCercana(m1);
+      const elegido = m1.length ? eligeVentana(m1) : null;
+      if (elegido) {
         usadasGlob.add(bkNormClave(elegido.clave));
         const dudosa = m1.length > 1;  // entre varias del mismo importe, ELEGIMOS nosotros = invento
         entradas.push({ serie: elegido.serie, numero: elegido.numero, importe: rec.importe,
@@ -4933,20 +4947,35 @@ async function remesaDeducir(id) {
     !fcAnuladas.has(bkNormClave(c.clave)));
   let resueltas = 0, sinResolver = [];
   const nuevo = [];
-  // Desempate por fecha (cuotas mensuales del mismo importe): la más cercana ANTERIOR a la remesa
+  // ══ DOCTRINA: NOMBRE FISCAL obligatorio + VENTANA de fechas inapelable (25→45→90 días
+  // antes de la remesa, +4 de margen). Fuera de ventana NO se deduce — se queda '—' para ✎.
+  const fechaRemD = m.fecha || '';
   const masCercanaD = lista => lista.slice().sort((a, b) => {
-    const ref = m.fecha || '';
-    const va = a.fecha && ref ? Math.abs(new Date(ref) - new Date(a.fecha)) + (a.fecha > ref ? 1e12 : 0) : 9e15;
-    const vb = b.fecha && ref ? Math.abs(new Date(ref) - new Date(b.fecha)) + (b.fecha > ref ? 1e12 : 0) : 9e15;
+    const va = a.fecha && fechaRemD ? Math.abs(new Date(fechaRemD) - new Date(a.fecha)) + (a.fecha > fechaRemD ? 1e12 : 0) : 9e15;
+    const vb = b.fecha && fechaRemD ? Math.abs(new Date(fechaRemD) - new Date(b.fecha)) + (b.fecha > fechaRemD ? 1e12 : 0) : 9e15;
     return va - vb;
   })[0];
+  const enVentanaD = (lista, dias) => lista.filter(c => {
+    if (!c.fecha || !fechaRemD) return false;
+    const dd = (new Date(fechaRemD) - new Date(c.fecha)) / 86400000;
+    return dd >= -4 && dd <= dias;
+  });
+  const eligeVentanaD = lista => {
+    for (const dias of [25, 45, 90]) {
+      const v = enVentanaD(lista, dias);
+      if (v.length === 1) return v[0];
+      if (v.length > 1) return masCercanaD(v);
+    }
+    return null;
+  };
   m.conciliado.forEach(f => {
     if (f.serie !== '—') { nuevo.push(f); return; }
-    const grupo = cands.filter(c => !usadas.has(bkNormClave(c.clave)) &&
-      (bkNombreEnConcepto(c.cliente, f.cliente || '') || bkNombreEnConcepto(f.cliente || '', c.cliente)));
+    const grupo = enVentanaD(cands.filter(c => !usadas.has(bkNormClave(c.clave)) &&
+      (bkNombreEnConcepto(c.cliente, f.cliente || '') || bkNombreEnConcepto(f.cliente || '', c.cliente))), 90);
     const exactas = grupo.filter(c => Math.abs(c.importe - (f.importe || 0)) < 0.01);
-    const sol = exactas.length === 1 ? [exactas[0]]
-              : exactas.length > 1 ? [masCercanaD(exactas)]
+    const elegida = exactas.length ? eligeVentanaD(exactas) : null;
+    const sol = elegida ? [elegida]
+              : exactas.length ? null
               : bkBuscarDesglose(grupo, f.importe || 0);
     if (sol && sol.length) {
       sol.forEach(c => { usadas.add(bkNormClave(c.clave)); nuevo.push({ serie: c.serie, numero: c.numero,
