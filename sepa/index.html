@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mandatos SEPA — JS-TECH</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#10265e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SEPA JST">
+<style>
+*{box-sizing:border-box}
+body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#f2f4f8;color:#1c2430}
+.top{background:#10265e;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;
+  position:sticky;top:0;z-index:10;padding-top:calc(12px + env(safe-area-inset-top))}
+.top img{height:38px;border-radius:6px}
+.top h1{font-size:17px;margin:0}
+.top small{color:#aec6f7;font-weight:400;display:block;font-size:11px}
+.wrap{max-width:860px;margin:0 auto;padding:12px}
+.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+input,select{padding:11px;border:1px solid #bcc4d4;border-radius:8px;font-size:16px}
+#buscar{width:100%}
+.tablebox{max-height:300px;overflow:auto;margin-top:10px;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:9px 6px;border-bottom:1px solid #e8ecf2;text-align:left}
+thead th{position:sticky;top:0;background:#fff;z-index:1}
+tr.sel{background:#eef3ff}
+tbody tr{cursor:pointer}
+.btn{padding:11px 16px;border:0;border-radius:9px;font-size:15px;font-weight:600;cursor:pointer;background:#10265e;color:#fff}
+.btn:disabled{background:#aab}
+.btn2{background:#e8ecf5;color:#334}
+.btn.wa{background:#1faa55;text-decoration:none;display:inline-block}
+.tag{font-size:12px;padding:2px 8px;border-radius:99px;white-space:nowrap}
+.si{background:#d9f2e0;color:#176b35}.no{background:#fde3e3;color:#a32}
+.res{background:#eef7ee;border:1px solid #bfe3c5;border-radius:10px;padding:12px;margin-top:12px;display:none;word-break:break-all}
+.res a{color:#10265e}
+.fila{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+small.mut{color:#778}
+#qrbox p{margin:6px 0}
+.offline{display:none;background:#fde3e3;color:#a32;text-align:center;padding:8px;font-size:13px;font-weight:600}
+@media (max-width:640px){
+  .wrap{padding:8px}
+  .card{padding:12px;border-radius:10px}
+  .fila .btn,.fila .wa{flex:1 1 46%;text-align:center;padding:12px 8px;font-size:14px}
+  .fila input{flex:1 1 100%!important}
+  .fila select{flex:1 1 100%}
+  td,th{font-size:13px;padding:8px 4px}
+  .top h1{font-size:15px}
+}
+</style>
+</head>
+<body>
+<div class="top">
+  <img src="icon-192.png" alt="JS-TECH">
+  <h1>Mandatos SEPA B2B<small>JS TECHNOLOGY MENORCA SL</small></h1>
+</div>
+<div class="offline" id="offline">Sin conexión con el bridge — comprueba que esté arrancado</div>
+<div class="wrap">
+
+<div class="card">
+  <input id="buscar" placeholder="Buscar cliente por nombre o NIF…" oninput="filtrar()">
+  <div class="tablebox">
+  <table><thead><tr><th>Cliente</th><th>NIF</th><th>IBAN</th></tr></thead><tbody id="lista"></tbody></table>
+  </div>
+</div>
+
+<div class="card" id="panel" style="display:none">
+  <b id="pNombre"></b> <small class="mut" id="pCif"></small>
+  <div class="fila">
+    <input id="iban" placeholder="IBAN (ES00 …)" style="flex:2;min-width:200px">
+    <input id="bic" placeholder="BIC (opcional)" style="flex:1;min-width:110px">
+    <select id="tipo"><option value="recurrente">Pago recurrente</option><option value="unico">Pago único</option></select>
+  </div>
+  <div class="fila">
+    <button class="btn" onclick="crear()">Generar enlace de firma</button>
+    <small class="mut" style="flex-basis:100%">Si dejas el IBAN vacío, se le pedirá al cliente al firmar.</small>
+  </div>
+  <div class="res" id="res"></div>
+</div>
+
+<div class="card">
+  <b>Mandatos generados</b>
+  <button class="btn btn2" style="padding:5px 10px;font-size:13px" onclick="cargarMandatos()">Actualizar</button>
+  <div class="tablebox">
+  <table><thead><tr><th>Fecha</th><th>Cliente</th><th>Ref.</th><th>Estado</th><th></th></tr></thead>
+  <tbody id="mandatos"></tbody></table>
+  </div>
+</div>
+
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+const BRIDGE='https://uncooked-sprung-unpinned.ngrok-free.dev';
+const H={'ngrok-skip-browser-warning':'1'};
+let CLIENTES=[],SEL=null;
+
+async function bfetch(ruta,opts){
+  opts=opts||{};opts.headers=Object.assign({},H,opts.headers||{});
+  try{
+    const r=await fetch(BRIDGE+ruta,opts);
+    document.getElementById('offline').style.display='none';
+    return r;
+  }catch(e){
+    document.getElementById('offline').style.display='block';
+    throw e;
+  }
+}
+
+async function cargar(){
+  try{
+    const r=await bfetch('/sepa/clientes');const j=await r.json();
+    if(j.error){document.getElementById('lista').innerHTML='<tr><td colspan=3>Error: '+j.error+'</td></tr>';return;}
+    CLIENTES=j.clientes;filtrar();
+  }catch(e){}
+}
+function filtrar(){
+  const q=document.getElementById('buscar').value.toLowerCase();
+  const rows=CLIENTES.filter(c=>!q||c.nombre.toLowerCase().includes(q)||(c.cif||'').toLowerCase().includes(q)).slice(0,60);
+  document.getElementById('lista').innerHTML=rows.map(c=>
+    `<tr class="${SEL&&SEL.id==c.id?'sel':''}" onclick='elegir(${JSON.stringify(JSON.stringify(c))})'>
+     <td>${c.nombre}</td><td>${c.cif||''}</td>
+     <td>${c.iban?'<span class="tag si">guardado</span>':'<span class="tag no">falta</span>'}</td></tr>`).join('');
+}
+function elegir(s){
+  SEL=JSON.parse(s);
+  document.getElementById('panel').style.display='block';
+  document.getElementById('pNombre').textContent=SEL.nombre;
+  document.getElementById('pCif').textContent=SEL.cif||'';
+  document.getElementById('iban').value=SEL.iban||'';
+  document.getElementById('bic').value=SEL.bic||'';
+  document.getElementById('res').style.display='none';
+  filtrar();
+  document.getElementById('panel').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+async function crear(){
+  if(!SEL)return;
+  const body={cliente_id:SEL.id,iban:document.getElementById('iban').value,
+    bic:document.getElementById('bic').value,tipo:document.getElementById('tipo').value};
+  const r=await bfetch('/sepa/mandato',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();
+  const res=document.getElementById('res');res.style.display='block';
+  if(j.error){res.innerHTML='⚠ '+j.error;return;}
+  const msg=encodeURIComponent('Hola, te envío el mandato SEPA de JS TECHNOLOGY MENORCA SL para revisar y firmar desde el móvil: '+j.url);
+  res.innerHTML=`<b>Enlace de firma</b> (ref ${j.referencia}):<br><a href="${j.url}" target="_blank">${j.url}</a>
+   <div class="fila">
+   <button class="btn" onclick="navigator.clipboard.writeText('${j.url}');this.textContent='¡Copiado!'">Copiar enlace</button>
+   <a class="btn wa" href="https://wa.me/?text=${msg}" target="_blank">WhatsApp</a>
+   <a class="btn btn2" style="text-decoration:none" href="${j.pdf}" target="_blank">Descargar PDF</a>
+   <button class="btn btn2" onclick="qrPresencial('${j.url}','${j.token}')">📱 Firma presencial (QR)</button></div>
+   <div id="qrbox" style="margin-top:10px"></div>`;
+  cargarMandatos();cargar();
+}
+let pollQR=null;
+function qrPresencial(url,token){
+  const box=document.getElementById('qrbox');
+  box.innerHTML='<p>El cliente escanea este QR con la cámara del móvil y le sale SOLO la tableta de firma:</p><div id="qrimg"></div><p id="qrestado" style="font-weight:600">⏳ Esperando firma…</p>';
+  new QRCode(document.getElementById('qrimg'),{text:url+'?pad=1',width:220,height:220});
+  if(pollQR)clearInterval(pollQR);
+  pollQR=setInterval(async()=>{
+    try{
+      const r=await bfetch('/sepa/f/'+token+'/estado');const e=await r.json();
+      if(e.firmado){clearInterval(pollQR);
+        document.getElementById('qrestado').innerHTML='✔ ¡FIRMADO! <a href="'+BRIDGE+'/sepa/firmado/'+token+'" target="_blank">Ver PDF firmado</a>';
+        cargarMandatos();}
+    }catch(_){}
+  },3000);
+}
+async function cargarMandatos(){
+  try{
+    const r=await bfetch('/sepa/mandatos');const j=await r.json();
+    document.getElementById('mandatos').innerHTML=(j.mandatos||[]).map(m=>
+      `<tr><td>${m.creado.slice(0,10)}</td><td>${m.cliente}</td><td>${m.referencia}</td>
+       <td>${m.firmado?'<span class="tag si">firmado '+(m.firma_fecha||'').slice(0,10)+'</span>':'<span class="tag no">pendiente</span>'}</td>
+       <td>${m.firmado?'<a href="'+BRIDGE+'/sepa/firmado/'+m.token+'" target="_blank">PDF</a>':'<a href="'+BRIDGE+'/sepa/f/'+m.token+'" target="_blank">enlace</a>'}</td></tr>`).join('');
+  }catch(e){}
+}
+cargar();cargarMandatos();
+if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js');}
+</script>
+</body>
+</html>

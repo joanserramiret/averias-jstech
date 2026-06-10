@@ -81,6 +81,11 @@ App web de gestión de **averías / órdenes de trabajo (OT)** de JS-TECH, servi
   pinta QR (`url_pad`) y hace polling a `/sepa/f/<token>/estado` hasta el "✔ ¡Mandato firmado!".
   En móvil se oculta: el cliente firma normal con el dedo (decisión de Joan 2026-06-11).
 - OJO: `/sepa/auto&json=1` CREA mandato si no existe → solo se llama al PULSAR el botón, nunca al cargar.
+- **PWA del panel SEPA [2026-06-11]**: carpeta `sepa/` del repo (index.html + manifest.json + sw.js + icon-*.png)
+  → `https://joanserramiret.github.io/averias-jstech/sepa/`. Es el MISMO panel que sirve el bridge en `/sepa/`
+  pero estático en Pages, responsive e instalable (móvil y PC). Habla con el bridge por ngrok (`const BRIDGE`,
+  CORS ya abierto). El sw.js NUNCA cachea el ngrok; network-first para estáticos. Banner rojo si el bridge
+  no responde. Si cambia la URL de ngrok: tocar `BRIDGE` en `sepa/index.html` Y el panel del módulo del bridge.
 
 ## Estado al 2026-06-08
 - Roles técnico/admin funcionando (detección por nombre de perfil; "andrew" ya no ve facturas).
