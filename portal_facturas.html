@@ -399,6 +399,7 @@ function setQuarter(q){
   document.getElementById('fecha-hasta').value=y+'-'+String(m[1]).padStart(2,'0')+'-'+lastDay;
   clearQuickHighlight();
   document.querySelectorAll('.qbtn')[q-1].classList.add('active');
+  aplicarFiltro();
 }
 function setFullYear(){
   var y=parseInt(document.getElementById('sel-year').value);
@@ -406,6 +407,7 @@ function setFullYear(){
   document.getElementById('fecha-hasta').value=y+'-12-31';
   clearQuickHighlight();
   document.querySelectorAll('.qbtn')[4].classList.add('active');
+  aplicarFiltro();
 }
 function clearQuick(){ clearQuickHighlight(); }
 function clearQuickHighlight(){ document.querySelectorAll('.qbtn').forEach(function(b){b.classList.remove('active');}); }
@@ -462,10 +464,10 @@ async function doLogin(){
   document.getElementById('login-screen').style.display='none';
   document.getElementById('portal-screen').style.display='block';
   initYearSelector();
-  setFullYear();
+  cargarFacturasCliente();
 }
 function doLogout(){
-  currentCustomer=null;facturas=[];
+  currentCustomer=null;facturas=[];facturasTodas=[];
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('portal-screen').style.display='none';
   ['facturas','mayor','347'].forEach(function(t){
@@ -476,59 +478,70 @@ function doLogout(){
   });
 }
 
-// ---- BUSCAR ----
-async function buscarFacturas(){
-  var desde=document.getElementById('fecha-desde').value;
-  var hasta=document.getElementById('fecha-hasta').value;
-  if(!desde||!hasta){alert('Selecciona un rango de fechas.');return;}
+// ---- CARGA (caché del bridge) + FILTRO EN LOCAL ----
+let facturasTodas = [];
+
+// Carga UNA sola vez todo el histórico del cliente desde la caché del bridge
+// (endpoint /portal/facturas-cliente, que lee agora_docs SIN llamar a Ágora día a día).
+async function cargarFacturasCliente(){
   var btn=document.getElementById('btn-buscar');
-  btn.disabled=true;btn.textContent='Buscando...';
-  mostrarSplash('Consultando facturas en Ágora...');
+  if(btn){btn.disabled=true;btn.textContent='Cargando...';}
+  mostrarSplash('Cargando facturas del cliente...');
   ['facturas','mayor','347'].forEach(function(t){
-    document.getElementById('area-'+t).innerHTML='<div class="status-msg loading">Consultando Ágora...</div>';
+    document.getElementById('area-'+t).innerHTML='<div class="status-msg loading">Cargando facturas...</div>';
   });
   ['btn-dl-all','btn-dl-sel','btn-prev-lista','btn-prev-mayor','btn-dl-mayor','btn-prev-347','btn-dl-347'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.style.display='none';
   });
-
-  var dates=datesInRange(desde,hasta);
-  var all=[];
-  var BATCH=30;
-  var totalDays=dates.length;
-  var done=0;
-
-  async function fetchDay(d){
-    try{
-      var resp=await fetch(BRIDGE_URL+'/api/export/?business-day='+d+'&filter=Invoices&include-processed=true',{headers:{'ngrok-skip-browser-warning':'true'}});
-      var data=await resp.json();
-      return data.Invoices||data.invoices||[];
-    }catch(e){return [];}
-  }
-
-  for(var i=0;i<dates.length;i+=BATCH){
-    var batch=dates.slice(i,i+BATCH);
-    var results=await Promise.all(batch.map(fetchDay));
-    results.forEach(function(invs){
-      invs.forEach(function(inv){
-        if(SERIES_VALIDAS.indexOf(inv.Serie)!==-1&&inv.Customer&&String(inv.Customer.Id)===String(currentCustomer.Id)){
-          all.push(inv);
-        }
-      });
+  try{
+    var resp=await fetch(BRIDGE_URL+'/portal/facturas-cliente?id='+encodeURIComponent(currentCustomer.Id),{headers:{'ngrok-skip-browser-warning':'true'}});
+    var data=await resp.json();
+    var lista=data.Invoices||data.facturas||[];
+    facturasTodas=lista.filter(function(inv){return SERIES_VALIDAS.indexOf(inv.Serie)!==-1;});
+    facturasTodas.sort(function(a,b){return new Date(a.Date)-new Date(b.Date);});
+  }catch(e){
+    facturasTodas=[];
+    ocultarSplash();
+    if(btn){btn.disabled=false;btn.textContent='Buscar';}
+    ['facturas','mayor','347'].forEach(function(t){
+      document.getElementById('area-'+t).innerHTML='<div class="status-msg">Error al cargar las facturas. ¿Está el bridge activo?</div>';
     });
-    done+=batch.length;
-    btn.textContent='Buscando... '+Math.round(done/totalDays*100)+'%';
-    mostrarSplash('Consultando facturas... '+Math.round(done/totalDays*100)+'%');
+    return;
   }
-
-  // Sort by date asc
-  all.sort(function(a,b){return new Date(a.Date)-new Date(b.Date);});
-  facturas=all;
   ocultarSplash();
-  btn.disabled=false;btn.textContent='Buscar';
+  if(btn){btn.disabled=false;btn.textContent='Buscar';}
+  // Por defecto mostramos TODO el histórico cargado (de la 1ª a la última factura)
+  if(facturasTodas.length){
+    var fechas=facturasTodas.map(function(f){return (f.Date||'').slice(0,10);}).filter(Boolean).sort();
+    document.getElementById('fecha-desde').value=fechas[0]||'';
+    document.getElementById('fecha-hasta').value=fechas[fechas.length-1]||'';
+  }
+  clearQuickHighlight();
+  aplicarFiltro();
+}
+
+// Filtra EN LOCAL (sin volver a Ágora) las facturas ya cargadas según el rango de fechas
+function aplicarFiltro(){
+  var desde=document.getElementById('fecha-desde').value;
+  var hasta=document.getElementById('fecha-hasta').value;
+  facturas=facturasTodas.filter(function(f){
+    var d=(f.Date||'').slice(0,10);
+    if(!d) return true;
+    if(desde && d<desde) return false;
+    if(hasta && d>hasta) return false;
+    return true;
+  });
+  ocultarSplash();
+  ['btn-dl-all','btn-dl-sel','btn-prev-lista','btn-prev-mayor','btn-dl-mayor','btn-prev-347','btn-dl-347'].forEach(function(id){
+    var el=document.getElementById(id);if(el)el.style.display='none';
+  });
   renderFacturas();
   renderMayor();
-  render347(desde,hasta);
+  render347(desde||'', hasta||'');
 }
+
+// El botón "Buscar" y los accesos rápidos filtran en local (instantáneo, sin re-consultar Ágora).
+function buscarFacturas(){ aplicarFiltro(); }
 
 // ---- RENDER FACTURAS ----
 function renderFacturas(){
