@@ -65,6 +65,13 @@ App web de gestión de **averías / órdenes de trabajo (OT)** de JS-TECH, servi
   incremental (solo baja los días nuevos). PENDIENTE de montar la tarea.
 - **PENDIENTE: quitar el "cargador de facturas"** del portal — la carga manual día a día ya no sirve (ahora todo viene
   de la caché). Confirmar con Joan qué elemento exacto se elimina antes de tocarlo.
+- **Template de factura calcado a Ágora [2026-06-10]**: el portal genera cada PDF de factura con el MISMO render que
+  averías/contable, vía fichero compartido **`factura_template.js`** (`generarDocHTML(doc,'factura')` + `generarPDFBlob`,
+  extraídos de `averias_agora.html`). Consume el formato nativo de Ágora; usa `_tfm`/`_tfd` propios (= los de averías,
+  con hora en fecha y sin separador de miles) para no depender de los `fm`/`fd` del portal, que difieren. Cableado en las
+  3 descargas por-factura (botón ⬇ PDF de fila, suelta y ZIP); Mayor/347 siguen con su plantilla. `generarFacturaHTML`
+  del portal queda como código muerto. **Hay que commitear `factura_template.js` (nuevo) + `portal_facturas.html`.**
+  PENDIENTE/idea: de-duplicar — que averías y contable tiren también de `factura_template.js` (ahora cada uno tiene su copia).
 
 ## Estado al 2026-06-08
 - Roles técnico/admin funcionando (detección por nombre de perfil; "andrew" ya no ve facturas).
