@@ -149,24 +149,45 @@ async function crear(){
    <button class="btn" onclick="navigator.clipboard.writeText('${j.url}');this.textContent='¡Copiado!'">Copiar enlace</button>
    <a class="btn wa" href="https://wa.me/?text=${msg}" target="_blank">WhatsApp</a>
    <a class="btn btn2" style="text-decoration:none" href="${j.pdf}" target="_blank">Descargar PDF</a>
+   <button class="btn btn2" onclick="firmarAqui('${j.url}','${j.token}')">✍ Firmar en este dispositivo</button>
    <button class="btn btn2" onclick="qrPresencial('${j.url}','${j.token}')">📱 Firma presencial (QR)</button></div>
    <div id="qrbox" style="margin-top:10px"></div>`;
   cargarMandatos();cargar();
 }
 let pollQR=null;
-function qrPresencial(url,token){
+function cerrarQR(){
+  if(pollQR){clearInterval(pollQR);pollQR=null;}
   const box=document.getElementById('qrbox');
-  box.innerHTML='<p>El cliente escanea este QR con la cámara del móvil y le sale SOLO la tableta de firma:</p><div id="qrimg"></div><p id="qrestado" style="font-weight:600">⏳ Esperando firma…</p>';
-  new QRCode(document.getElementById('qrimg'),{text:url+'?pad=1',width:220,height:220});
+  if(box)box.innerHTML='';
+}
+function vigilar(token,texto){
+  document.getElementById('qrestado').textContent=texto||'⏳ Esperando firma…';
   if(pollQR)clearInterval(pollQR);
   pollQR=setInterval(async()=>{
     try{
       const r=await bfetch('/sepa/f/'+token+'/estado');const e=await r.json();
-      if(e.firmado){clearInterval(pollQR);
+      if(e.firmado){clearInterval(pollQR);pollQR=null;
         document.getElementById('qrestado').innerHTML='✔ ¡FIRMADO! <a href="'+BRIDGE+'/sepa/firmado/'+token+'" target="_blank">Ver PDF firmado</a>';
         cargarMandatos();}
     }catch(_){}
   },3000);
+}
+function firmarAqui(url,token){
+  // firma presencial en ESTE dispositivo: se abre la tableta de firma en otra pestaña
+  const box=document.getElementById('qrbox');
+  box.innerHTML='<p>Se ha abierto la tableta de firma en otra pestaña. Pásale el dispositivo al cliente y vuelve aquí al terminar.</p>'+
+    '<p id="qrestado" style="font-weight:600"></p>'+
+    '<div class="fila"><button class="btn btn2" onclick="cerrarQR()">✖ Cerrar</button></div>';
+  vigilar(token,'⏳ Esperando firma en este dispositivo…');
+  window.open(url+'?pad=1','_blank');
+}
+function qrPresencial(url,token){
+  const box=document.getElementById('qrbox');
+  box.innerHTML='<p>El cliente escanea este QR con la cámara del móvil y le sale SOLO la tableta de firma:</p><div id="qrimg"></div>'+
+    '<p id="qrestado" style="font-weight:600"></p>'+
+    '<div class="fila"><button class="btn btn2" onclick="cerrarQR()">✖ Cerrar</button></div>';
+  new QRCode(document.getElementById('qrimg'),{text:url+'?pad=1',width:220,height:220});
+  vigilar(token);
 }
 async function cargarMandatos(){
   try{
