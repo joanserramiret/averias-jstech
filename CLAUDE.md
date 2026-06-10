@@ -52,6 +52,20 @@ App web de gestión de **averías / órdenes de trabajo (OT)** de JS-TECH, servi
   (Antes era "Clientes sin email", que se quitó por irrelevante.)
 - **Splash de espera** al login: "espere mientras se cargan los clientes" (`cargarClientes`/`cargarDashboard` envueltos en try/finally), keyframes `splashspin`.
 
+## Portal de Facturas (`portal_facturas.html`) [2026-06-10]
+- Portal de cliente: entra con ID de cliente + CIF y ve SUS facturas de Ágora (pestañas Facturas / Mayor / Modelo 347).
+- **Lee de la CACHÉ del bridge, NO de Ágora en directo.** Al hacer login llama UNA vez a
+  `GET /portal/facturas-cliente?id=<Customer.Id>` (en `bridge.py`: lee `agora_docs` tipo='factura', filtra por cliente).
+  Devuelve TODO su histórico (todos los años) de golpe → `cargarFacturasCliente()` lo guarda en `facturasTodas`.
+- **Filtros EN LOCAL**: Año / T1–T4 / Desde-Hasta / botón Buscar filtran lo ya cargado en el navegador, al instante,
+  sin re-consultar Ágora (`aplicarFiltro()`). Antes pedía día a día a Ágora vía `/api/export/?business-day=` (lento).
+- La caché la rellena `/agora/sync` (incremental; tablas `agora_docs`/`agora_dias` en `banco.db`). **Backfill 2013→2026
+  hecho [2026-06-10]: ~22.033 docs.** Detalle del sync en el CLAUDE.md del bridge. El endpoint nuevo es solo lectura.
+- **Refresco de facturas nuevas: cada 2 días** (decidido [2026-06-10]) — tarea programada que lanza el `/agora/sync`
+  incremental (solo baja los días nuevos). PENDIENTE de montar la tarea.
+- **PENDIENTE: quitar el "cargador de facturas"** del portal — la carga manual día a día ya no sirve (ahora todo viene
+  de la caché). Confirmar con Joan qué elemento exacto se elimina antes de tocarlo.
+
 ## Estado al 2026-06-08
 - Roles técnico/admin funcionando (detección por nombre de perfil; "andrew" ya no ve facturas).
 - Filtros de OT por técnico (admin) + autoasignación + crear sin asignar: hechos.

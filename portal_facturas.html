@@ -14,6 +14,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<!-- Template de FACTURA calcado al PDF de Ágora (compartido con averias_agora). -->
+<script src="factura_template.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:Verdana,Arial,sans-serif;font-size:13px;color:#222;background:#f0f4fb;min-height:100vh;}
@@ -1006,7 +1008,7 @@ async function descargarUna(idx,btn){
   var f=facturas[idx];
   if(btn){btn.disabled=true;btn.textContent='...';}
   try{
-    var blob=await htmlToPdfBlob(generarFacturaHTML(f));
+    var blob=await generarPDFBlob(f, 'factura');
     var url=URL.createObjectURL(blob);
     var a=document.createElement('a');a.href=url;a.download='Factura_'+f.Serie+'-'+f.Number+'.pdf';a.click();
     URL.revokeObjectURL(url);
@@ -1024,7 +1026,7 @@ async function descargarTodas(){ await descargarLote(facturas.map(function(_,i){
 async function descargarLote(idxs){
   if(idxs.length===1){
     showProgress(0,1,'Generando PDF...');
-    try{var blob=await htmlToPdfBlob(generarFacturaHTML(facturas[idxs[0]]));
+    try{var blob=await generarPDFBlob(facturas[idxs[0]], 'factura');
     var url=URL.createObjectURL(blob);var a=document.createElement('a');
     a.href=url;a.download='Factura_'+facturas[idxs[0]].Serie+'-'+facturas[idxs[0]].Number+'.pdf';
     a.click();URL.revokeObjectURL(url);}catch(e){alert('Error: '+e.message);}
@@ -1035,7 +1037,7 @@ async function descargarLote(idxs){
   for(var i=0;i<idxs.length;i++){
     var f=facturas[idxs[i]];
     setProgress(i,idxs.length,'Generando '+f.Serie+'-'+f.Number+'...');
-    try{var blob=await htmlToPdfBlob(generarFacturaHTML(f));zip.file('Factura_'+f.Serie+'-'+f.Number+'.pdf',blob);}catch(e){}
+    try{var blob=await generarPDFBlob(f, 'factura');zip.file('Factura_'+f.Serie+'-'+f.Number+'.pdf',blob);}catch(e){}
   }
   setProgress(idxs.length,idxs.length,'Comprimiendo ZIP...');
   var zipBlob=await zip.generateAsync({type:'blob'});
