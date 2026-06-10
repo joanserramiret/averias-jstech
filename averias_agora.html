@@ -1527,7 +1527,12 @@ async function crearAlbaran() {
 
     const lineas = [];
     let idx = 0;
-    if (horas > 0) lineas.push(buildLinea(idx++, HORA_PRODUCT_ID, 'Hora servicio tecnico', horas, precioHora, desc || null));
+    // La nota de la línea "Hora servicio técnico" lleva la descripción del trabajo de la OT
+    // (si el albarán se crea desde una OT) para que sirva de descripción del trabajo en el albarán.
+    const descTrabajoOT = (_otParaAlbaran && _otParaAlbaran.descripcion)
+      ? String(_otParaAlbaran.descripcion).trim()
+      : (desc || null);
+    if (horas > 0) lineas.push(buildLinea(idx++, HORA_PRODUCT_ID, 'Hora servicio tecnico', horas, precioHora, descTrabajoOT || null));
     if (selectedZona > 0) {
       const z = ZONA_CONFIG[selectedZona];
       lineas.push(buildLinea(idx++, z.id, 'Desplazamiento ' + z.nombre, 1, z.precio, null));
