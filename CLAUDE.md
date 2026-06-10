@@ -73,6 +73,15 @@ App web de gestión de **averías / órdenes de trabajo (OT)** de JS-TECH, servi
   del portal queda como código muerto. **Hay que commitear `factura_template.js` (nuevo) + `portal_facturas.html`.**
   PENDIENTE/idea: de-duplicar — que averías y contable tiren también de `factura_template.js` (ahora cada uno tiene su copia).
 
+## Domiciliación SEPA en el portal [2026-06-11]
+- Tarjeta "💳 Domiciliación bancaria (SEPA)" en `portal_facturas.html` (entre Filtros y Tabs) + JS al final
+  (`sepaFirmar`/`sepaPad`) + qrcodejs por CDN. Backend: módulo `sepa_mandatos.py` del bridge (ver su CLAUDE.md).
+- "✍ Firmar mandato SEPA" → `/sepa/auto?cliente=<currentCustomer.Id>` (flujo completo: vista previa + FIRMAR AQUÍ).
+- "📱 Usar tu móvil como tableta de firma" SOLO se ve en PC (detección `pointer:coarse` + ancho <820):
+  pinta QR (`url_pad`) y hace polling a `/sepa/f/<token>/estado` hasta el "✔ ¡Mandato firmado!".
+  En móvil se oculta: el cliente firma normal con el dedo (decisión de Joan 2026-06-11).
+- OJO: `/sepa/auto&json=1` CREA mandato si no existe → solo se llama al PULSAR el botón, nunca al cargar.
+
 ## Estado al 2026-06-08
 - Roles técnico/admin funcionando (detección por nombre de perfil; "andrew" ya no ve facturas).
 - Filtros de OT por técnico (admin) + autoasignación + crear sin asignar: hechos.

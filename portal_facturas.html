@@ -16,6 +16,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <!-- Template de FACTURA calcado al PDF de Ágora (compartido con averias_agora). -->
 <script src="factura_template.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:Verdana,Arial,sans-serif;font-size:13px;color:#222;background:#f0f4fb;min-height:100vh;}
@@ -285,6 +286,21 @@ table.t-347 tfoot td:first-child{text-align:left;}
           <input type="date" id="fecha-hasta"/>
         </div>
         <button class="btn-buscar" id="btn-buscar" onclick="buscarFacturas()">Buscar</button>
+      </div>
+    </div>
+
+    <!-- DOMICILIACIÓN SEPA -->
+    <div class="filter-card" id="sepa-card">
+      <h3>💳 Domiciliación bancaria (SEPA)</h3>
+      <p style="font-size:12px;color:#666;margin:8px 0 12px;">Domicilia el pago de tus facturas firmando el mandato SEPA. Solo te llevará un minuto.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <button class="btn-buscar" style="margin:0" onclick="sepaFirmar()">✍ Firmar mandato SEPA</button>
+        <button class="qbtn" id="sepa-btn-pad" style="display:none" onclick="sepaPad()">📱 Usar tu móvil como tableta de firma</button>
+      </div>
+      <div id="sepa-qr" style="display:none;margin-top:12px;background:#fff;border:1px solid #d5dbe8;border-radius:8px;padding:14px;max-width:280px;text-align:center;">
+        <p style="font-size:12px;color:#666;margin:0 0 10px;">Escanea con la cámara del móvil:<br>en el móvil solo saldrá el recuadro de firma; el documento se queda aquí.</p>
+        <div id="sepa-qr-img" style="display:inline-block;"></div>
+        <p id="sepa-estado" style="font-weight:bold;font-size:13px;margin:10px 0 0;"></p>
       </div>
     </div>
 
@@ -1145,6 +1161,44 @@ function setProgress(done,total,label){
   document.getElementById('prog-label').textContent=label+' ('+done+'/'+total+')';
 }
 function hideProgress(){ document.getElementById('progress-overlay').classList.remove('show'); }
+
+// ---- DOMICILIACIÓN SEPA ----
+// En móvil/táctil NO se ofrece la "tableta de firma": el cliente firma normal
+// con el dedo en su propia pantalla (flujo completo con vista previa del PDF).
+function sepaEsMovil(){return window.matchMedia('(pointer:coarse)').matches||window.innerWidth<820;}
+function sepaFirmar(){
+  if(!currentCustomer)return;
+  window.open(BRIDGE_URL+'/sepa/auto?cliente='+encodeURIComponent(currentCustomer.Id),'_blank');
+}
+var _sepaPoll=null;
+async function sepaPad(){
+  if(!currentCustomer)return;
+  var box=document.getElementById('sepa-qr');
+  box.style.display='block';
+  document.getElementById('sepa-qr-img').innerHTML='';
+  document.getElementById('sepa-estado').textContent='Generando enlace…';
+  try{
+    var r=await fetch(BRIDGE_URL+'/sepa/auto?cliente='+encodeURIComponent(currentCustomer.Id)+'&json=1',{headers:{'ngrok-skip-browser-warning':'true'}});
+    var j=await r.json();
+    if(j.firmado){
+      document.getElementById('sepa-estado').innerHTML='✔ Ya tienes el mandato firmado — <a href="'+j.pdf_firmado+'" target="_blank">ver PDF</a>';
+      return;
+    }
+    new QRCode(document.getElementById('sepa-qr-img'),{text:j.url_pad,width:190,height:190});
+    document.getElementById('sepa-estado').textContent='⏳ Esperando firma…';
+    if(_sepaPoll)clearInterval(_sepaPoll);
+    _sepaPoll=setInterval(async function(){
+      try{
+        var e=await (await fetch(BRIDGE_URL+'/sepa/f/'+j.token+'/estado',{headers:{'ngrok-skip-browser-warning':'true'}})).json();
+        if(e.firmado){
+          clearInterval(_sepaPoll);
+          document.getElementById('sepa-estado').innerHTML='✔ ¡Mandato firmado! <a href="'+BRIDGE_URL+'/sepa/firmado/'+j.token+'" target="_blank">Ver PDF</a>';
+        }
+      }catch(_){}
+    },3000);
+  }catch(e){document.getElementById('sepa-estado').textContent='Error: '+e.message;}
+}
+if(!sepaEsMovil()){var _sbp=document.getElementById('sepa-btn-pad');if(_sbp)_sbp.style.display='inline-block';}
 
 // ---- KEYBOARD ----
 document.getElementById('inp-clientid').addEventListener('keydown',function(e){if(e.key==='Enter')verificarId();});
