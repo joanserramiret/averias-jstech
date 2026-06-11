@@ -74,7 +74,10 @@ small.mut{color:#778}
 <div class="wrap">
 
 <div class="card">
-  <input id="buscar" placeholder="Buscar cliente por nombre o NIF…" oninput="filtrar()">
+  <div style="display:flex;gap:8px">
+    <input id="buscar" placeholder="Buscar cliente por nombre o NIF…" oninput="filtrar()" style="flex:1">
+    <button class="btn btn2" id="btnRef" onclick="cargar(true)" title="Recargar la lista desde Ágora">⟳</button>
+  </div>
   <div class="tablebox">
   <table><thead><tr><th>Cliente</th><th>NIF</th><th>IBAN</th></tr></thead><tbody id="lista"></tbody></table>
   </div>
@@ -122,12 +125,15 @@ async function bfetch(ruta,opts){
   }
 }
 
-async function cargar(){
+async function cargar(force){
+  const br=document.getElementById('btnRef');
+  if(force){br.disabled=true;br.textContent='…';}
   try{
-    const r=await bfetch('/sepa/clientes');const j=await r.json();
+    const r=await bfetch('/sepa/clientes'+(force?'?refrescar=1':''));const j=await r.json();
     if(j.error){document.getElementById('lista').innerHTML='<tr><td colspan=3>Error: '+j.error+'</td></tr>';return;}
     CLIENTES=j.clientes;filtrar();
   }catch(e){}
+  finally{br.disabled=false;br.textContent='⟳';}
 }
 function filtrar(){
   const q=document.getElementById('buscar').value.toLowerCase();
