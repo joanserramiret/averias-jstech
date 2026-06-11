@@ -224,8 +224,16 @@ async function cargarMandatos(){
       `<tr><td>${m.creado.slice(0,10)}</td><td>${m.cliente}</td><td>${m.referencia}</td>
        <td>${m.firmado?'<span class="tag si">firmado '+(m.firma_fecha||'').slice(0,10)+'</span>':'<span class="tag no">pendiente</span>'}</td>
        <td>${m.firmado?'<a href="'+BRIDGE+'/sepa/firmado/'+m.token+'" target="_blank">PDF</a>'
-         :`<a href="${BRIDGE}/sepa/f/${m.token}" target="_blank">enlace</a> · <a href="#" onclick="pedirPDF('${m.token}');return false" title="Subir el PDF que el cliente firmó por su cuenta">📎 subir firmado</a>`}</td></tr>`).join('');
+         :`<a href="${BRIDGE}/sepa/f/${m.token}" target="_blank">enlace</a> · <a href="#" onclick="pedirPDF('${m.token}');return false" title="Subir el PDF que el cliente firmó por su cuenta">📎 subir firmado</a>`}
+        · <a href="#" style="color:#a32" onclick="anular('${m.token}','${m.referencia}');return false" title="Anular este mandato para poder repetirlo">🗑</a></td></tr>`).join('');
   }catch(e){}
+}
+async function anular(tk,ref){
+  if(!confirm('¿ANULAR el mandato '+ref+'?\n\nSi está firmado, su PDF se moverá a la carpeta "anulados" y el enlace dejará de funcionar. Después podrás generar uno nuevo.'))return;
+  try{
+    const r=await bfetch('/sepa/anular/'+tk,{method:'POST'});const j=await r.json();
+    if(j.ok){cargarMandatos();cargar();}else alert(j.error||'Error');
+  }catch(e){alert('Sin conexión con el bridge.');}
 }
 let SUBIR_TK=null;
 function pedirPDF(tk){SUBIR_TK=tk;document.getElementById('fSubir').click();}
