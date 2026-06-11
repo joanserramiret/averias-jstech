@@ -54,9 +54,21 @@ small.mut{color:#778}
 </style>
 </head>
 <body>
+<div id="login-ov" style="position:fixed;inset:0;background:#10265e;display:flex;align-items:center;justify-content:center;z-index:100;padding:16px">
+  <div style="background:#fff;border-radius:14px;padding:28px 22px;width:min(320px,92vw);text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.35)">
+    <img src="icon-192.png" style="height:56px;border-radius:12px" alt="JS-TECH">
+    <h2 style="color:#10265e;font-size:17px;margin:10px 0 2px">Mandatos SEPA</h2>
+    <p style="color:#667;font-size:12px;margin:0 0 16px">Acceso restringido — usuario de Ágora</p>
+    <input id="lg-user" placeholder="Usuario" autocomplete="username" style="width:100%;margin-bottom:10px">
+    <input id="lg-pin" type="password" placeholder="PIN" autocomplete="current-password" style="width:100%;margin-bottom:14px">
+    <button class="btn" style="width:100%" onclick="doLogin()">Entrar</button>
+    <p id="lg-err" style="color:#c11;font-size:13px;font-weight:600;min-height:18px;margin:10px 0 0"></p>
+  </div>
+</div>
 <div class="top">
   <img src="icon-192.png" alt="JS-TECH">
   <h1>Mandatos SEPA B2B<small>JS TECHNOLOGY MENORCA SL</small></h1>
+  <button class="btn btn2" style="margin-left:auto;padding:6px 12px;font-size:13px" onclick="logout()">Salir</button>
 </div>
 <div class="offline" id="offline">Sin conexión con el bridge — comprueba que esté arrancado</div>
 <div class="wrap">
@@ -200,7 +212,29 @@ async function cargarMandatos(){
        <td>${m.firmado?'<a href="'+BRIDGE+'/sepa/firmado/'+m.token+'" target="_blank">PDF</a>':'<a href="'+BRIDGE+'/sepa/f/'+m.token+'" target="_blank">enlace</a>'}</td></tr>`).join('');
   }catch(e){}
 }
-cargar();cargarMandatos();
+// ── LOGIN (misma lógica que averías: usuarios de Ágora, solo perfiles admin) ──
+async function doLogin(){
+  const u=document.getElementById('lg-user').value.trim();
+  const p=document.getElementById('lg-pin').value.trim();
+  const err=document.getElementById('lg-err');err.textContent='';
+  if(!u||!p){err.textContent='Introduce usuario y PIN.';return;}
+  err.textContent='Verificando…';
+  try{
+    const r=await bfetch('/api/export-master/?filter=Users');
+    const d=await r.json();
+    const us=(d.Users||[]).find(x=>!x.DeletionDate&&(x.Name||'').toLowerCase()===u.toLowerCase()&&(x.Password===p||x.SmartphonePassword===p));
+    if(!us){err.textContent='Usuario o PIN incorrecto.';return;}
+    const perfil=((us.Profile||'')+'').toLowerCase();
+    if(perfil.indexOf('admin')===-1){err.textContent='Tu perfil no permite gestionar mandatos SEPA.';return;}
+    localStorage.setItem('sepa_user',us.Name);
+    document.getElementById('login-ov').style.display='none';
+    cargar();cargarMandatos();
+  }catch(e){err.textContent='Sin conexión con el bridge.';}
+}
+function logout(){localStorage.removeItem('sepa_user');location.reload();}
+document.getElementById('lg-user').value=localStorage.getItem('sepa_user')||'';
+['lg-user','lg-pin'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();}));
+if(document.getElementById('lg-user').value)document.getElementById('lg-pin').focus();
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js');}
 </script>
 </body>
