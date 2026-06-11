@@ -88,7 +88,7 @@ small.mut{color:#778}
     <select id="tipo"><option value="recurrente">Pago recurrente</option><option value="unico">Pago único</option></select>
   </div>
   <div class="fila">
-    <button class="btn" onclick="crear()">Generar enlace de firma</button>
+    <button class="btn" id="btnGen" onclick="crear()">Generar enlace de firma</button>
     <small class="mut" style="flex-basis:100%">Si dejas el IBAN vacío, se le pedirá al cliente al firmar.</small>
   </div>
   <div class="res" id="res"></div>
@@ -150,23 +150,30 @@ function elegirId(id){
   document.getElementById('panel').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 async function crear(){
-  if(!SEL)return;
+  if(!SEL||window._creando)return;
+  window._creando=true;
+  const bg=document.getElementById('btnGen');
+  bg.disabled=true;bg.textContent='Generando…';
+  try{
   const body={cliente_id:SEL.id,iban:document.getElementById('iban').value,
     bic:document.getElementById('bic').value,tipo:document.getElementById('tipo').value};
   const r=await bfetch('/sepa/mandato',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();
   const res=document.getElementById('res');res.style.display='block';
   if(j.error){res.innerHTML='⚠ '+j.error;return;}
-  const msg=encodeURIComponent('Hola, te envío el mandato SEPA de JS TECHNOLOGY MENORCA SL para revisar y firmar desde el móvil: '+j.url);
+  window._sepaMsg='Hola, te envío el mandato SEPA de JS TECHNOLOGY MENORCA SL para revisar y firmar desde el móvil, no te llevará más de 1 minuto: '+j.url+'\n\nTienes que mandarle una copia firmada también a tu banco. Que tengas un buen día.';
+  const msg=encodeURIComponent(window._sepaMsg);
   res.innerHTML=`<b>Enlace de firma</b> (ref ${j.referencia}):<br><a href="${j.url}" target="_blank">${j.url}</a>
    <div class="fila">
-   <button class="btn" onclick="navigator.clipboard.writeText('${j.url}');this.textContent='¡Copiado!'">Copiar enlace</button>
+   <button class="btn" onclick="navigator.clipboard.writeText(window._sepaMsg);this.textContent='¡Copiado!'">Copiar mensaje</button>
    <a class="btn wa" href="https://wa.me/?text=${msg}" target="_blank">WhatsApp</a>
    <a class="btn btn2" style="text-decoration:none" href="${j.pdf}" target="_blank">Descargar PDF</a>
    <button class="btn btn2" onclick="firmarAqui('${j.url}','${j.token}')">✍ Firmar en este dispositivo</button>
    <button class="btn btn2" onclick="qrPresencial('${j.url}','${j.token}')">📱 Firma presencial (QR)</button></div>
    <div id="qrbox" style="margin-top:10px"></div>`;
   cargarMandatos();cargar();
+  }catch(e){}
+  finally{window._creando=false;bg.disabled=false;bg.textContent='Generar enlace de firma';}
 }
 let pollQR=null;
 function cerrarQR(){
