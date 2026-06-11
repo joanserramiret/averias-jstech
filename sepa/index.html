@@ -8,6 +8,7 @@
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="theme-color" content="#10265e">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="SEPA JST">
@@ -120,12 +121,13 @@ function filtrar(){
   const q=document.getElementById('buscar').value.toLowerCase();
   const rows=CLIENTES.filter(c=>!q||c.nombre.toLowerCase().includes(q)||(c.cif||'').toLowerCase().includes(q)).slice(0,60);
   document.getElementById('lista').innerHTML=rows.map(c=>
-    `<tr class="${SEL&&SEL.id==c.id?'sel':''}" onclick='elegir(${JSON.stringify(JSON.stringify(c))})'>
+    `<tr class="${SEL&&SEL.id==c.id?'sel':''}" onclick="elegirId('${c.id}')">
      <td>${c.nombre}</td><td>${c.cif||''}</td>
      <td>${c.iban?'<span class="tag si">guardado</span>':'<span class="tag no">falta</span>'}</td></tr>`).join('');
 }
-function elegir(s){
-  SEL=JSON.parse(s);
+function elegirId(id){
+  SEL=CLIENTES.find(x=>String(x.id)===String(id));
+  if(!SEL)return;
   document.getElementById('panel').style.display='block';
   document.getElementById('pNombre').textContent=SEL.nombre;
   document.getElementById('pCif').textContent=SEL.cif||'';
