@@ -301,6 +301,7 @@ table.t-347 tfoot td:first-child{text-align:left;}
         <p style="font-size:12px;color:#666;margin:0 0 10px;">Escanea con la cámara del móvil:<br>en el móvil solo saldrá el recuadro de firma; el documento se queda aquí.</p>
         <div id="sepa-qr-img" style="display:inline-block;"></div>
         <p id="sepa-estado" style="font-weight:bold;font-size:13px;margin:10px 0 0;"></p>
+        <button class="qbtn" style="margin-top:10px;" onclick="sepaCerrar()">✖ Cancelar</button>
       </div>
     </div>
 
@@ -1171,6 +1172,10 @@ function sepaFirmar(){
   window.open(BRIDGE_URL+'/sepa/auto?cliente='+encodeURIComponent(currentCustomer.Id),'_blank');
 }
 var _sepaPoll=null;
+function sepaCerrar(){
+  if(_sepaPoll){clearInterval(_sepaPoll);_sepaPoll=null;}
+  document.getElementById('sepa-qr').style.display='none';
+}
 async function sepaPad(){
   if(!currentCustomer)return;
   var box=document.getElementById('sepa-qr');
