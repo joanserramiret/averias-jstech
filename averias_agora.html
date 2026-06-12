@@ -924,8 +924,8 @@
     <div class="row" style="gap:10px;margin-bottom:12px">
       <div class="field" style="flex:1">
         <label style="font-size:11px;font-weight:700;color:#1a2e6e;text-transform:uppercase;letter-spacing:.5px">Técnico</label>
-        <input type="text" id="ot-tecnico" list="lista-tecnicos" placeholder="Nombre técnico"
-          style="width:100%;padding:9px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-top:4px"/>
+        <select id="ot-tecnico"
+          style="width:100%;padding:9px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-top:4px;background:#fff"></select>
         <datalist id="lista-tecnicos"></datalist>
         <label id="ot-tecnico-self" style="display:none;align-items:center;gap:6px;font-size:12px;color:#555;margin-top:6px;cursor:pointer">
           <input type="checkbox" id="ot-tecnico-self-chk" onchange="toggleAsignarmeOT()" style="width:auto"/> Asignármela a mí
@@ -4461,6 +4461,7 @@ function poblarFiltroTecnicos() {
   // Autocompletado del campo técnico del modal
   const dl = document.getElementById('lista-tecnicos');
   if (dl) dl.innerHTML = tecnicos.map(t => `<option value="${t.replace(/"/g,'&quot;')}">`).join('');
+  poblarSelectTecnicoOT();   // rellena el <select> de técnico del modal de OT
 
   const sel = document.getElementById('ot-filtro-tecnico');
   if (!sel) return;
@@ -4472,6 +4473,19 @@ function poblarFiltroTecnicos() {
                   '<option value="__sin__">⚪ Sin asignar</option>' +
                   tecnicos.map(t => `<option value="${t.replace(/"/g,'&quot;')}">👤 ${t}</option>`).join('');
   if ([...sel.options].some(o => o.value === actual)) sel.value = actual;
+}
+
+// Rellena el <select id="ot-tecnico"> del modal de OT con los técnicos de Ágora
+// (+ nombres históricos). Conserva 'valor' aunque no esté en la lista (no perder datos).
+function poblarSelectTecnicoOT(valor) {
+  const sel = document.getElementById('ot-tecnico');
+  if (!sel || sel.tagName !== 'SELECT') return;
+  const v = (valor !== undefined && valor !== null) ? String(valor) : (sel.value || '');
+  let tecnicos = obtenerTecnicos();
+  if (v && tecnicos.indexOf(v) === -1) tecnicos = [v].concat(tecnicos);
+  sel.innerHTML = '<option value="">— Sin asignar —</option>' +
+    tecnicos.map(t => `<option value="${t.replace(/"/g,'&quot;')}">${t.replace(/</g,'&lt;')}</option>`).join('');
+  sel.value = v;
 }
 
 async function asignarmeOT(otId) {
@@ -4499,7 +4513,7 @@ function aplicarPermisoTecnicoOT() {
   const selfLbl = document.getElementById('ot-tecnico-self');
   const chk = document.getElementById('ot-tecnico-self-chk');
   const esTec = CURRENT_USER_ROLE === 'tecnico';
-  inp.readOnly = esTec;
+  inp.disabled = esTec;
   inp.style.background = esTec ? '#f3f4f6' : '';
   inp.title = esTec ? 'Solo un administrador puede escribir aquí — usa la casilla' : '';
   if (selfLbl) selfLbl.style.display = esTec ? 'flex' : 'none';
@@ -4514,7 +4528,7 @@ function aplicarPermisoTecnicoOT() {
 function toggleAsignarmeOT() {
   const inp = document.getElementById('ot-tecnico');
   const chk = document.getElementById('ot-tecnico-self-chk');
-  inp.value = chk.checked ? (CURRENT_USER_NAME || '') : '';
+  poblarSelectTecnicoOT(chk.checked ? (CURRENT_USER_NAME || '') : '');
 }
 
 // ── MODAL NUEVA / EDITAR OT ──
@@ -4529,7 +4543,7 @@ function abrirModalNuevaOT() {
   document.getElementById('ot-cliente-tel').value = '';
   document.getElementById('ot-cliente-email').value = '';
   document.getElementById('ot-descripcion').value = '';
-  document.getElementById('ot-tecnico').value = (CURRENT_USER_ROLE === 'tecnico') ? '' : (CURRENT_USER_NAME || '');
+  poblarSelectTecnicoOT((CURRENT_USER_ROLE === 'tecnico') ? '' : (CURRENT_USER_NAME || ''));
   aplicarPermisoTecnicoOT();
   document.getElementById('ot-estado').value = 'pendiente';
   document.getElementById('ot-notas').value = '';
@@ -4550,7 +4564,7 @@ function abrirModalEditarOT(otId) {
   document.getElementById('ot-cliente-tel').value = ot.cliente?.tel || '';
   document.getElementById('ot-cliente-email').value = ot.cliente?.email || '';
   document.getElementById('ot-descripcion').value = ot.descripcion || '';
-  document.getElementById('ot-tecnico').value = ot.tecnico || '';
+  poblarSelectTecnicoOT(ot.tecnico || '');
   aplicarPermisoTecnicoOT();
   document.getElementById('ot-estado').value = ot.estado || 'pendiente';
   document.getElementById('ot-notas').value = ot.notas || '';
