@@ -4383,7 +4383,8 @@ function renderOTs() {
     lista = lista.filter(o => (o.tecnico || '').toLowerCase() === fTec.toLowerCase());
   }
   // Filtro por estado: por DEFECTO solo pendientes + en curso; cerradas/facturadas SOLO si se eligen en el desplegable.
-  const fEst = (document.getElementById('ot-filtro-estado') || {}).value || 'activas';
+  const _selEst = document.getElementById('ot-filtro-estado');
+  const fEst = _selEst ? _selEst.value : 'activas';   // '' = Todos (muestra todo); solo defecto si no existe el select
   if (fEst === 'activas') {
     lista = lista.filter(o => o.estado === 'pendiente' || o.estado === 'en_curso');
   } else if (fEst) {
