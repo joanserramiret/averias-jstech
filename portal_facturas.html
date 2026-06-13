@@ -374,7 +374,7 @@ let facturas = [];
 
 // ---- HELPERS ----
 function fm(v){ return (parseFloat(v)||0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €'; }
-function fd(s){ if(!s)return '—'; var d=new Date(s); return isNaN(d)?s:d.toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'}); }
+function fd(s){ if(!s)return '—'; var d=new Date(s); return isNaN(d)?s:d.toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-'); }
 function padDate(d){ return d.toISOString().split('T')[0]; }
 function datesInRange(from,to){
   var dates=[],cur=new Date(from+'T00:00:00'),end=new Date(to+'T00:00:00');
@@ -886,7 +886,7 @@ function docPreviewHTML(titulo,cliente,desde,hasta,contenido){
     '<span><strong>Periodo:</strong> '+fd(desde)+' — '+fd(hasta)+'</span>'+
     '</div>'+
     contenido+
-    '<div class="pie">Generado el '+new Date().toLocaleDateString('es-ES')+' — Portal Facturas JS Technology Menorca SL</div>'+
+    '<div class="pie">Generado el '+new Date().toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-')+' — Portal Facturas JS Technology Menorca SL</div>'+
     '</body></html>';
 }
 

@@ -635,7 +635,6 @@
   <div id="facturar-bar" style="display:none;background:var(--blanco);border:1.5px solid var(--naranja);border-radius:var(--radio-sm);padding:14px 16px;margin-bottom:12px;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
     <div style="font-size:14px;font-weight:600;color:var(--azul)"><span id="sel-count">0</span> albarán(es) seleccionado(s)</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="primary-btn" style="width:auto;background:var(--naranja)" onclick="facturarSeleccionados()">🧾 Facturar seleccionados</button>
       <button class="primary-btn" style="width:auto;background:#1a2e6e" onclick="enviarSeleccionadosAlbaranes()">📧 Enviar seleccionados</button>
       <button class="primary-btn" style="width:auto;background:#c0392b" onclick="eliminarSeleccionados()">🗑 Eliminar seleccionados</button>
     </div>
@@ -843,7 +842,6 @@
       <button class="primary-btn" id="modal-btn-editar" onclick="editarAlbaran()" style="flex:1;background:#5a6380;display:none">✏️ Editar</button>
       <button class="secondary-btn" id="modal-btn-eliminar" onclick="eliminarAlbaran()" style="flex:1;color:#c00;border-color:#c00;display:none">🗑 Eliminar</button>
       <button class="primary-btn" id="modal-btn-cobrar" onclick="registrarCobroAlbaran()" style="flex:1;background:var(--naranja);display:none">💶 Registrar cobro</button>
-      <button class="primary-btn" id="modal-btn-facturar" onclick="facturarAlbaranManual()" style="flex:1;background:#1a7a3f;display:none">🧾 Facturar</button>
 
     </div>
   </div>
@@ -2114,7 +2112,7 @@ async function guardarFirma() {
   firmaCtx.fillRect(0, firmaCanvas.height - 36, firmaCanvas.width, 36);
   firmaCtx.fillStyle = '#5a6380';
   firmaCtx.font = '11px -apple-system, sans-serif';
-  firmaCtx.fillText('Albarán: ' + firmaAlbaranRef + ' · ' + new Date().toLocaleDateString('es-ES') + ' · JS Technology Menorca', 10, firmaCanvas.height - 18);
+  firmaCtx.fillText('Albarán: ' + firmaAlbaranRef + ' · ' + new Date().toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-') + ' · JS Technology Menorca', 10, firmaCanvas.height - 18);
 
   // Just save dataURL to localStorage for stamping - no share/drive needed
   firmaCanvas.toBlob(async (blob) => {
@@ -2430,7 +2428,7 @@ function actualizarBarraOffline() {
 function guardarCacheClientes(clientes) {
   try {
     localStorage.setItem(CACHE_KEY_CLIENTES, JSON.stringify(clientes));
-    localStorage.setItem(CACHE_KEY_DATE, new Date().toLocaleDateString('es-ES'));
+    localStorage.setItem(CACHE_KEY_DATE, new Date().toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-'));
   } catch(e) { console.warn('Cache full:', e); }
 }
 
@@ -2730,7 +2728,7 @@ async function subirFotoAlbaranConToken(albaranRef, file, token) {
     // Update foto list in localStorage
     const fotoCacheKey = 'jstech_fotos_' + albaranRef;
     const fotos = JSON.parse(localStorage.getItem(fotoCacheKey) || '[]');
-    fotos.push({ nombre, fecha: new Date().toLocaleDateString('es-ES') });
+    fotos.push({ nombre, fecha: new Date().toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-') });
     localStorage.setItem(fotoCacheKey, JSON.stringify(fotos));
     setStatus(statusEl, '✓ Foto guardada en Drive: ' + nombre, 'success');
   } catch(e) {
@@ -3517,7 +3515,7 @@ function fm(n) { return parseFloat(n||0).toFixed(2).replace('.', ',') + ' €'; 
 function fd(s) {
   if (!s) return '—';
   const d = new Date(s);
-  return d.toLocaleDateString('es-ES') + ' ' + d.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+  return d.toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-') + ' ' + d.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
 }
 
 function generarDocHTML(doc, tipo) {

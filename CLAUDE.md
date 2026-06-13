@@ -47,6 +47,31 @@ App web de gestión de **averías / órdenes de trabajo (OT)** de JS-TECH, servi
 - **Bug resuelto**: al guardar una OT editada se perdía la previsualización → `guardarOT` ya no resetea el filtro cuando hay `editId`.
 - **Notificaciones ntfy por técnico [2026-06-08]**: al crear una OT, el **bridge** notifica siempre al topic de admins (`jstech-averias-joan`) y, si hay técnico, además a `jstech-averias-<nombre normalizado>` (ej. Andrew → `jstech-averias-andrew`). El código vive en `C:\agora-bridge\bridge.py` (`notificar`, `_ntfy_topic_tecnico`, `ot_create`); detalle en el CLAUDE.md del bridge. El HTML no envía ntfy, solo hace `POST /ot` con el campo `tecnico`. Pendiente: no avisa al reasignar vía `PUT /ot`.
 
+## Cambios sesión [2026-06-13] (averías) — todo en `averias_agora.html`, un commit
+- **Decisión: ya NO se factura desde la app.** Se quitaron TODAS las acciones de facturar (botón "🧾 Facturar
+  seleccionados" de la barra de albaranes y "🧾 Facturar" del modal de albarán). El flujo es: la app crea
+  **albaranes** (suben a Ágora serie APP) y **las facturas se hacen en Ágora** agrupando albaranes (los formatos/config
+  los controla Ágora, que es donde fallaban los saltos de línea). Las funciones `facturarSeleccionados`,
+  `facturarAlbaranManual`, `crearFacturaGrupo` quedan como **código muerto** (sin disparador). La pestaña Facturas
+  sigue, pero **solo para consultar/ver/reenviar** facturas existentes.
+- **Campo Técnico de la OT = `<select>`** (antes input+datalist). Se rellena con `poblarSelectTecnicoOT(valor)` a partir
+  de `obtenerTecnicos()` (Ágora no-admin + históricos) + opción "— Sin asignar —"; conserva el valor aunque no esté en la
+  lista (no pierde nombres antiguos). Técnicos lo ven **`disabled`** (antes `readOnly`) y usan la casilla "Asignármela a mí".
+- **Filtro de estado de OTs por defecto = "🟡🔵 Pendientes + en curso"** (valor `activas`). `renderOTs` es la AUTORIDAD:
+  `activas`→solo pendiente+en_curso; `''` (Todos)→todas; estado concreto→ese. `loadOTs` trae todo para `activas`/`''`.
+  El reset al CREAR una OT va a `activas`. (Ojo bug ya corregido: `'' || 'activas'` convertía "Todos" en activas.)
+- **Albarán desde OT**: la nota de la línea "Hora servicio técnico" lleva la **descripción de la OT**
+  (`crearAlbaran` lee `_otParaAlbaran.descripcion`); sirve de descripción del trabajo. Albarán suelto → sin nota.
+- **Botón "＋ Nuevo albarán (sin OT)"** en la pestaña Albaranes → `nuevoAlbaranDirecto()` (pone `_otParaAlbaran=null`,
+  resetea y abre el form). Activa `tc-nueva` a mano (NO existe `tab-nueva`).
+- **Fix `switchTab`**: ahora tolera que no exista el botón `tab-<x>` (caso `'nueva'`) → **editar/duplicar albarán
+  reparados** (antes `switchTab('nueva')` petaba y dejaba pantalla en blanco).
+- **Producto nuevo** (`crearYAnadirProducto`): `UseAsDirectSale:false` → entra en Ágora SIN crear botón de venta
+  directa en la pantalla de familias (sigue siendo vendible: `SaleableAsMain:true`).
+- **GOTCHA mount**: editar `averias_agora.html` con la herramienta Edit deja el HOST correcto, pero si la edición
+  ACORTA el fichero, la copia del mount (bash) muestra **bytes nulos al final** (tras `</html>`) — es artefacto del
+  sandbox, NO del fichero real. Verificar el final con Read del host, no con el conteo de nulos de bash.
+
 ## Dashboard
 - KPI principal: **`kpi-ots`** = OT pendientes + en curso (vía bridge `/ot`, filtradas por rol, clicable).
   (Antes era "Clientes sin email", que se quitó por irrelevante.)

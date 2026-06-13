@@ -217,12 +217,13 @@ function qrPresencial(url,token){
   new QRCode(document.getElementById('qrimg'),{text:url+'?pad=1',width:220,height:220});
   vigilar(token);
 }
+function fd(s){const p=(s||'').slice(0,10).split('-');return p.length===3?p[2]+'-'+p[1]+'-'+p[0]:s||'';}
 async function cargarMandatos(){
   try{
     const r=await bfetch('/sepa/mandatos');const j=await r.json();
     document.getElementById('mandatos').innerHTML=(j.mandatos||[]).map(m=>
-      `<tr><td>${m.creado.slice(0,10)}</td><td>${m.cliente}</td><td>${m.referencia}</td>
-       <td>${m.firmado?'<span class="tag si">firmado '+(m.firma_fecha||'').slice(0,10)+'</span>':'<span class="tag no">pendiente</span>'}</td>
+      `<tr><td>${fd(m.creado)}</td><td>${m.cliente}</td><td>${m.referencia}</td>
+       <td>${m.firmado?'<span class="tag si">firmado '+fd(m.firma_fecha)+'</span>':'<span class="tag no">pendiente</span>'}</td>
        <td>${m.firmado?'<a href="'+BRIDGE+'/sepa/firmado/'+m.token+'" target="_blank">PDF</a>'
          :`<a href="${BRIDGE}/sepa/f/${m.token}" target="_blank">enlace</a> · <a href="#" onclick="pedirPDF('${m.token}');return false" title="Subir el PDF que el cliente firmó por su cuenta">📎 subir firmado</a>`}
         · <a href="#" style="color:#a32" onclick="anular('${m.token}','${m.referencia}');return false" title="Anular este mandato para poder repetirlo">🗑</a></td></tr>`).join('');

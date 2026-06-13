@@ -9,7 +9,7 @@ function _tfm(n) { return parseFloat(n||0).toFixed(2).replace('.', ',') + ' €'
 function _tfd(s) {
   if (!s) return '—';
   const d = new Date(s);
-  return d.toLocaleDateString('es-ES') + ' ' + d.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+  return d.toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-') + ' ' + d.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
 }
 
 function generarDocHTML(doc, tipo) {
