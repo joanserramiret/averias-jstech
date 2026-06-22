@@ -1,7 +1,7 @@
 /* Service worker del panel SEPA JS-TECH.
    - NUNCA cachea llamadas al bridge (ngrok): siempre red.
    - network-first para el resto (la app funciona offline con lo último visto). */
-const CACHE = 'sepa-jst-v1';
+const CACHE = 'sepa-jst-v2';
 const ESTATICOS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -18,7 +18,8 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   // API del bridge: siempre red, sin cache
-  if (url.hostname.endsWith('.ngrok-free.dev')) {
+  if (url.hostname.endsWith('.ngrok-free.dev') ||
+      url.hostname.endsWith('.js-tech.es')) {
     e.respondWith(fetch(e.request));
     return;
   }
