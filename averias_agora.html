@@ -1619,7 +1619,7 @@ async function crearAlbaran() {
     const totalPagado = pagosValidos.reduce((sum, p) => sum + p.amount, 0);
     const isPagadoTotal = totalPagado >= totalAlbaran - 0.01;
 
-    if (pagosValidos.length > 0 && isPagadoTotal) {
+    if (false) {   // Facturar desde la app RETIRADO (serie APPF muerta): las facturas se emiten en Ágora (serie F). Solo se crea el albarán.
       btn.textContent = 'Creando factura...';
       const nextFactNum = await obtenerSiguienteNumeroFactura();
       const pagosFmt = pagosValidos.map(p => ({
