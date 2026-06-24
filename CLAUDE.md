@@ -48,12 +48,20 @@ App web de gestión de **averías / órdenes de trabajo (OT)** de JS-TECH, servi
 - **Notificaciones ntfy por técnico [2026-06-08]**: al crear una OT, el **bridge** notifica siempre al topic de admins (`jstech-averias-joan`) y, si hay técnico, además a `jstech-averias-<nombre normalizado>` (ej. Andrew → `jstech-averias-andrew`). El código vive en `C:\agora-bridge\bridge.py` (`notificar`, `_ntfy_topic_tecnico`, `ot_create`); detalle en el CLAUDE.md del bridge. El HTML no envía ntfy, solo hace `POST /ot` con el campo `tecnico`. Pendiente: no avisa al reasignar vía `PUT /ot`.
 
 ## Cambios sesión [2026-06-13] (averías) — todo en `averias_agora.html`, un commit
-- **Decisión: ya NO se factura desde la app.** Se quitaron TODAS las acciones de facturar (botón "🧾 Facturar
-  seleccionados" de la barra de albaranes y "🧾 Facturar" del modal de albarán). El flujo es: la app crea
-  **albaranes** (suben a Ágora serie APP) y **las facturas se hacen en Ágora** agrupando albaranes (los formatos/config
-  los controla Ágora, que es donde fallaban los saltos de línea). Las funciones `facturarSeleccionados`,
-  `facturarAlbaranManual`, `crearFacturaGrupo` quedan como **código muerto** (sin disparador). La pestaña Facturas
-  sigue, pero **solo para consultar/ver/reenviar** facturas existentes.
+- **Facturación: se retiró la APPF (serie muerta) y se factura serie F como `facturacion.js-tech.es`.**
+  - Las viejas acciones APPF vía `/api/import/` están MUERTAS: botones "🧾 Facturar seleccionados" y el viejo "🧾 Facturar"
+    del modal QUITADOS; `facturarSeleccionados`/`facturarAlbaranManual`/`crearFacturaGrupo` = código muerto. Y `crearAlbaran`
+    ya NO crea factura APPF al pagar (rama tras `if (false)`); "Crear albarán" solo crea el **albarán** (serie APP).
+  - **NUEVO círculo: OT → Crear albarán → "🧾 Facturar albarán" (en el modal del albarán, SOLO admins)** → emite **serie F
+    REAL** por el MISMO endpoint del facturador **`POST /facturacion/albaran_emitir`** (canal `/bus/`, crea artículos que
+    falten, queda en el histórico del facturador). Replica la tarjeta de `facturacion.html` (líneas editables, forma de pago
+    Recibo/Transferencia, total en vivo, confirmación "factura fiscal real"). Funciones: `abrirFacturarAlbaran`,
+    `renderFacturarAlbaran`, `albfSet/albfDel/albfAddLn/albfSetPago`, `emitirFacturaAlbaran`; modal `#modal-facturar-alb`.
+    Mapea el albarán (`Customer`/`Lines`/`Payments`) → `{ref,customer_id,cif,cliente,forma_pago_id,lineas}`.
+  - **Albaranes y Facturas = SOLO admins de Ágora** (`aplicarPermisos` oculta a técnicos `tab-facturas` Y `tab-buscar`
+    + sus accesos del dashboard). Los técnicos crean albaranes desde la OT, pero no ven las pestañas Albaranes/Facturas.
+  - PENDIENTE/idea: averías lee los albaranes de Ágora directo (no del histórico del facturador), así que un albarán ya
+    facturado podría re-facturarse desde aquí (duplicar F). Guardarraíl = el diálogo de confirmación. Mejorable cruzando histórico.
 - **Campo Técnico de la OT = `<select>`** (antes input+datalist). Se rellena con `poblarSelectTecnicoOT(valor)` a partir
   de `obtenerTecnicos()` (Ágora no-admin + históricos) + opción "— Sin asignar —"; conserva el valor aunque no esté en la
   lista (no pierde nombres antiguos). Técnicos lo ven **`disabled`** (antes `readOnly`) y usan la casilla "Asignármela a mí".

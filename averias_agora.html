@@ -842,6 +842,7 @@
       <button class="primary-btn" id="modal-btn-editar" onclick="editarAlbaran()" style="flex:1;background:#5a6380;display:none">✏️ Editar</button>
       <button class="secondary-btn" id="modal-btn-eliminar" onclick="eliminarAlbaran()" style="flex:1;color:#c00;border-color:#c00;display:none">🗑 Eliminar</button>
       <button class="primary-btn" id="modal-btn-cobrar" onclick="registrarCobroAlbaran()" style="flex:1;background:var(--naranja);display:none">💶 Registrar cobro</button>
+      <button class="primary-btn" id="modal-btn-facturar-f" onclick="abrirFacturarAlbaran()" style="flex:1;background:#1a7a3f;display:none">🧾 Facturar albarán</button>
 
     </div>
   </div>
@@ -4046,6 +4047,9 @@ function verDetalle(i) {
     pagosSection.style.display = 'block';
     btnCobrar.style.display = 'block';
     btnEditar.style.display = 'block';
+    // Facturar albarán (serie F vía /bus/) — SOLO administradores de Ágora
+    var btnFacturarF = document.getElementById('modal-btn-facturar-f');
+    if (btnFacturarF) btnFacturarF.style.display = (CURRENT_USER_ROLE !== 'tecnico') ? 'block' : 'none';
     const btnFacturar = document.getElementById('modal-btn-facturar');
     const btnEliminar = document.getElementById('modal-btn-eliminar');
     const totalCobrado = pagosLocales.reduce((s,p) => s+(p.Amount||0), 0);
@@ -5138,9 +5142,13 @@ function aplicarPermisos() {
   const tabFacturas = document.getElementById('tab-facturas');
   if (tabFacturas) tabFacturas.style.display = esTecnico ? 'none' : '';
 
+  // ── Pestaña Albaranes (buscar) — solo administradores ──
+  const tabBuscar = document.getElementById('tab-buscar');
+  if (tabBuscar) tabBuscar.style.display = esTecnico ? 'none' : '';
+
   // ── Dashboard: ocultar acceso rápido a Facturas ──
   document.querySelectorAll('.dash-btn').forEach(btn => {
-    if (btn.textContent && btn.textContent.includes('Facturas')) {
+    if (btn.textContent && (btn.textContent.includes('Facturas') || btn.textContent.includes('Albaranes'))) {
       btn.style.display = esTecnico ? 'none' : '';
     }
   });
@@ -5382,6 +5390,94 @@ async function eliminarFirmaOT(otId) {
   } catch(e) { alert('Error: ' + e.message); }
 }
 
+</script>
+
+<!-- ── FACTURAR ALBARÁN → Factura F (replica el flujo de facturacion.js-tech.es; emite serie F por /bus/ vía /facturacion/albaran_emitir). Solo admins. ── -->
+<div id="modal-facturar-alb" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(15,31,92,.45);align-items:flex-start;justify-content:center;overflow:auto;padding:20px">
+  <div style="background:#fff;border-radius:14px;max-width:640px;width:100%;margin:auto;box-shadow:0 12px 48px rgba(0,0,0,.3);padding:18px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-weight:800;color:#0f1f5c;font-size:16px">🧾 Facturar albarán → Factura F</div>
+      <button onclick="cerrarFacturarAlbaran()" style="background:#eee;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:14px">✕</button>
+    </div>
+    <div id="facturar-alb-body"></div>
+  </div>
+</div>
+<script>
+/* Facturar un albarán como Factura F real (mismo modelo que facturacion.js-tech.es). Solo admins de Ágora. */
+let _albF = null;
+function _albFesc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function _albFeur(n){ return (Number(n)||0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €'; }
+function _albFtotal(){ return (_albF.lineas||[]).reduce(function(s,l){ return s+(Number(l.precio)||0)*(Number(l.cantidad)||0)*(1+(l.vatrate==null?0.21:Number(l.vatrate))); },0); }
+function abrirFacturarAlbaran(){
+  if (CURRENT_USER_ROLE === 'tecnico') return;          // solo administradores
+  var a = albaranActual; if(!a){ return; }
+  _albF = {
+    ref: a.Serie + '-' + a.Number,
+    customer_id: a.Customer ? a.Customer.Id : null,
+    cif: a.Customer ? (a.Customer.Cif||'') : '',
+    cliente: a.Customer ? (a.Customer.FiscalName || a.Customer.BusinessName || '') : '',
+    forma_pago_id: (a.Payments && a.Payments[0] && a.Payments[0].MethodId) || 4,
+    lineas: (a.Lines||[]).map(function(l){ return {
+      saleformat: l.SaleFormatId || l.ProductId || null,
+      nombre: l.ProductName || l.SaleFormatName || '',
+      precio: Number(l.UnitPrice)||0,
+      cantidad: Number(l.Quantity)||1,
+      vatid: l.VatId || 4,
+      vatrate: (l.VatRate==null?0.21:Number(l.VatRate)),
+      nota: l.Notes || ''
+    }; })
+  };
+  renderFacturarAlbaran();
+  document.getElementById('modal-facturar-alb').style.display = 'flex';
+}
+function cerrarFacturarAlbaran(){ document.getElementById('modal-facturar-alb').style.display = 'none'; }
+function renderFacturarAlbaran(){
+  var a = _albF;
+  var lns = (a.lineas||[]).map(function(l,li){ return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'
+    + '<input type="text" style="flex:1;min-width:0;padding:7px 9px;border:1.5px solid #dde;border-radius:7px;font-size:13px" value="'+_albFesc(l.nombre)+'" placeholder="Producto / servicio" onchange="albfSet('+li+',\'nombre\',this.value)">'
+    + '<input type="number" step="0.01" style="width:84px;padding:7px;border:1.5px solid #dde;border-radius:7px;font-size:13px;text-align:right" title="Precio neto" value="'+l.precio+'" onchange="albfSet('+li+',\'precio\',this.value)">'
+    + '<input type="number" step="1" style="width:58px;padding:7px;border:1.5px solid #dde;border-radius:7px;font-size:13px;text-align:right" title="Cantidad" value="'+l.cantidad+'" onchange="albfSet('+li+',\'cantidad\',this.value)">'
+    + '<button onclick="albfDel('+li+')" title="Quitar línea" style="background:#fff;border:1.5px solid #f0c0c0;color:#c0392b;border-radius:7px;padding:6px 9px;cursor:pointer">🗑</button>'
+    + (l.saleformat?'':'<span style="background:#fef3c7;color:#92400e;border-radius:5px;padding:2px 6px;font-size:10px;font-weight:700" title="Se creará en Ágora al emitir">nuevo</span>')
+    + '</div>'; }).join('');
+  var fp8 = a.forma_pago_id==8?' selected':'', fp4 = a.forma_pago_id==4?' selected':'';
+  document.getElementById('facturar-alb-body').innerHTML =
+      '<div style="font-weight:700;color:#0f1f5c">'+_albFesc(a.ref)+' · '+_albFesc(a.cliente)+'</div>'
+    + '<div style="color:#777;font-size:12px;margin-bottom:10px">'+(a.cif?_albFesc(a.cif):'')+'</div>'
+    + '<div style="color:#777;font-size:11.5px;margin-bottom:8px">Cada albarán → factura F real. Revisa las líneas; los productos que no existan se crean en Ágora.</div>'
+    + lns
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">'
+    + '<button onclick="albfAddLn()" style="background:#eef2ff;border:1.5px solid #c0cbea;color:#1a2e6e;border-radius:7px;padding:7px 12px;cursor:pointer;font-size:12px;font-weight:700">+ Añadir línea</button>'
+    + '<span style="color:#777;font-size:12px">Forma de pago:</span>'
+    + '<select onchange="albfSetPago(this.value)" style="padding:7px;border:1.5px solid #dde;border-radius:7px;font-size:13px"><option value="8"'+fp8+'>Recibo (domiciliado)</option><option value="4"'+fp4+'>Transferencia</option></select>'
+    + '<span style="margin-left:auto;font-weight:800;color:#0f1f5c;font-size:16px" id="albf-total">'+_albFeur(_albFtotal())+'</span>'
+    + '</div>'
+    + '<button onclick="emitirFacturaAlbaran(this)" style="margin-top:14px;width:100%;background:#1a7a3f;color:#fff;border:none;border-radius:9px;padding:12px;font-size:14px;font-weight:800;cursor:pointer">🧾 Emitir factura F real</button>'
+    + '<div id="albf-status" style="margin-top:8px;font-size:13px"></div>';
+}
+function albfSet(li,k,v){ _albF.lineas[li][k] = (k==='nombre')?v:(Number(v)||0); var t=document.getElementById('albf-total'); if(t) t.textContent=_albFeur(_albFtotal()); }
+function albfDel(li){ _albF.lineas.splice(li,1); renderFacturarAlbaran(); }
+function albfAddLn(){ _albF.lineas.push({saleformat:null,nombre:'',precio:0,cantidad:1,vatid:4,vatrate:0.21,nota:''}); renderFacturarAlbaran(); }
+function albfSetPago(v){ _albF.forma_pago_id = Number(v); }
+async function emitirFacturaAlbaran(btn){
+  var a = _albF; if(!a) return;
+  if(!(a.lineas||[]).length){ alert('El albarán no tiene líneas.'); return; }
+  if(!confirm('Emitir FACTURA F real de '+a.ref+' a '+a.cliente+'\n\nTotal '+_albFeur(_albFtotal())+' · '+(a.forma_pago_id==8?'Recibo domiciliado':'Transferencia')+'\n\nEs una factura fiscal real. ¿Continuar?')) return;
+  var st = document.getElementById('albf-status');
+  if(btn){ btn.disabled=true; btn.textContent='Emitiendo…'; }
+  if(st){ st.style.color='#777'; st.textContent='Emitiendo por Ágora…'; }
+  try{
+    var r = await fetch(BRIDGE_URL + '/facturacion/albaran_emitir', {
+      method:'POST', headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'true'},
+      body: JSON.stringify({ confirmar:true, ref:a.ref, customer_id:a.customer_id, cif:a.cif, cliente:a.cliente, forma_pago_id:a.forma_pago_id, lineas:a.lineas })
+    });
+    var j = await r.json();
+    if(!j.ok){ if(st){ st.style.color='#c0392b'; st.textContent='❌ '+(j.error||'Error al emitir'); } if(btn){ btn.disabled=false; btn.textContent='🧾 Emitir factura F real'; } return; }
+    if(st){ st.style.color='#1a7a3f'; st.textContent='✅ Emitida '+j.serie+'-'+j.numero+' · '+_albFeur(j.total)+((j.creados&&j.creados.length)?(' · creados: '+j.creados.map(function(c){return c.nombre;}).join(', ')):''); }
+    if(btn){ btn.textContent='✓ '+j.serie+'-'+j.numero+' emitida'; }
+    setTimeout(function(){ cerrarFacturarAlbaran(); if(typeof buscarAlbaranes==='function') buscarAlbaranes(); }, 1800);
+  }catch(e){ if(st){ st.style.color='#c0392b'; st.textContent='Error: '+e.message; } if(btn){ btn.disabled=false; btn.textContent='🧾 Emitir factura F real'; } }
+}
 </script>
 </body>
 </html>
