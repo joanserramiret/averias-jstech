@@ -60,8 +60,13 @@ App web de gestión de **averías / órdenes de trabajo (OT)** de JS-TECH, servi
     Mapea el albarán (`Customer`/`Lines`/`Payments`) → `{ref,customer_id,cif,cliente,forma_pago_id,lineas}`.
   - **Albaranes y Facturas = SOLO admins de Ágora** (`aplicarPermisos` oculta a técnicos `tab-facturas` Y `tab-buscar`
     + sus accesos del dashboard). Los técnicos crean albaranes desde la OT, pero no ven las pestañas Albaranes/Facturas.
-  - PENDIENTE/idea: averías lee los albaranes de Ágora directo (no del histórico del facturador), así que un albarán ya
-    facturado podría re-facturarse desde aquí (duplicar F). Guardarraíl = el diálogo de confirmación. Mejorable cruzando histórico.
+  - **MARCADO DE FACTURADOS [resuelto]**: averías cruza el histórico del facturador para saber qué albaranes APP ya tienen F.
+    `cargarAlbFacturados()` lee `GET /facturacion/historico` (`{facturas:[...]}`), saca de cada `centro` "Albarán APP-N" el nº →
+    `_albFacturados[nº]='F-N'`. Helper `_albEstaFacturado(a)` = en histórico O `a.Status==='Invoiced'`. En `buscarAlbaranes`,
+    por defecto NO muestra facturados; el check **"Mostrar también los facturados"** los revela. En `renderAlbaranes` el
+    facturado sale **en gris (opacity .6)**, badge **"✅ Facturado · F-N"**, **sin checkbox** (no seleccionable en lote) y
+    **agrupado abajo** ("✅ Facturados (N)"). En `verDetalle`, `facturado=_albEstaFacturado(a)` → `isPending=false` → se ocultan
+    Editar/Eliminar/Cobrar/Facturar → **no se puede modificar ni re-facturar** (cero F duplicadas). Sin tocar el bridge.
 - **Campo Técnico de la OT = `<select>`** (antes input+datalist). Se rellena con `poblarSelectTecnicoOT(valor)` a partir
   de `obtenerTecnicos()` (Ágora no-admin + históricos) + opción "— Sin asignar —"; conserva el valor aunque no esté en la
   lista (no pierde nombres antiguos). Técnicos lo ven **`disabled`** (antes `readOnly`) y usan la casilla "Asignármela a mí".

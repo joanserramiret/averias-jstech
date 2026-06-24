@@ -3816,6 +3816,19 @@ function initBuscador() {
 let todosAlbaranes = [];
 let albaranesFiltrados = [];
 let albaranActual = null;
+let _albFacturados = {};   // nº APP -> 'F-N' (histórico del facturador; la serie F no marca el albarán como Invoiced en Ágora)
+async function cargarAlbFacturados() {
+  _albFacturados = {};
+  try {
+    const r = await fetch(BRIDGE_URL + '/facturacion/historico', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const j = await r.json();
+    (j.facturas || []).forEach(function(row) {
+      const m = String(row.centro || '').match(/APP-(\d+)/i);
+      if (m) _albFacturados[m[1]] = (row.serie || 'F') + '-' + row.numero;
+    });
+  } catch(e) { /* histórico no disponible: se queda vacío, no rompe la búsqueda */ }
+}
+function _albEstaFacturado(a) { return !!(a && (_albFacturados[a.Number] || a.Status === 'Invoiced')); }
 
 function getDatesInRange(from, to) {
   const dates = [];
@@ -3853,10 +3866,11 @@ async function buscarAlbaranes() {
     const results = await Promise.all(
       dates.map(d => agoraGet('/api/export/?business-day=' + d + '&filter=DeliveryNotes&include-processed=true'))
     );
+    await cargarAlbFacturados();
     const mostrarFacturados = document.getElementById('mostrar-facturados').checked;
     results.forEach(r => {
       if (r.DeliveryNotes) todosAlbaranes = todosAlbaranes.concat(
-        r.DeliveryNotes.filter(a => a.Serie === SERIE && (mostrarFacturados || a.Status !== 'Invoiced'))
+        r.DeliveryNotes.filter(a => a.Serie === SERIE && (mostrarFacturados || !_albEstaFacturado(a)))
       );
     });
     todosAlbaranes.sort((a, b) => new Date(b.Date) - new Date(a.Date));
@@ -3895,7 +3909,7 @@ function renderAlbaranes() {
   barEl2.style.display = CURRENT_USER_ROLE === 'tecnico' ? 'none' : 'flex';
   document.getElementById('sel-count').textContent = '0';
 
-  listEl.innerHTML = albaranesFiltrados.map((a, i) => {
+  const _rowHTML = (a, i) => {
     const cliente = a.Customer ? (a.Customer.BusinessName || a.Customer.FiscalName || '') : '';
     const fecha = a.Date ? a.Date.split('T')[0] : '';
     const importe = a.Totals ? a.Totals.GrossAmount.toFixed(2) + '€' : '—';
@@ -3904,6 +3918,8 @@ function renderAlbaranes() {
     const emailBadge = email
       ? '<span style="font-size:11px;color:var(--gris-texto)">✉ ' + email + '</span>'
       : '<span style="font-size:11px;color:#e07050">⚠ Sin email</span>';
+    const fRef = _albFacturados[a.Number];
+    const esFact = !!(fRef || a.Status === 'Invoiced');
     // Color border based on payment status
     const pagosCacheKey2 = 'jstech_pagos_' + a.Serie + '_' + a.Number;
     const pagosItem = JSON.parse(localStorage.getItem(pagosCacheKey2) || '[]');
@@ -3912,14 +3928,21 @@ function renderAlbaranes() {
     let borderColor = '#c0392b'; // rojo - sin cobro
     if (totalCobradoItem > 0 && totalCobradoItem < totalItem - 0.01) borderColor = 'var(--naranja)'; // naranja - parcial
     if (totalCobradoItem >= totalItem - 0.01) borderColor = '#1a7a3f'; // verde - cobrado total
-    if (a.Status === 'Invoiced') borderColor = '#1a2e6e'; // azul - facturado
-
-    return '<div class="albaran-item" style="display:flex;align-items:center;gap:10px;border-left:4px solid ' + borderColor + ';padding-left:8px">' +
-      '<input type="checkbox" class="alb-checkbox" data-idx="' + i + '" style="width:18px;height:18px;flex-shrink:0;cursor:pointer" onchange="actualizarContadorAlbaranes()" onclick="event.stopPropagation()" />' +
+    if (esFact) borderColor = '#1a2e6e'; // azul - facturado
+    const factBadge = esFact
+      ? '<span style="font-size:11px;font-weight:700;color:#1a2e6e;background:#e8f0fb;border-radius:5px;padding:1px 7px">✅ Facturado' + (fRef ? ' · ' + fRef : '') + '</span>'
+      : '';
+    const itemStyle = 'display:flex;align-items:center;gap:10px;border-left:4px solid ' + borderColor + ';padding-left:8px' + (esFact ? ';opacity:.6;background:#f6f7f9' : '');
+    // Facturado → sin checkbox (no se puede seleccionar para enviar/eliminar en lote; bloqueado)
+    const chk = esFact
+      ? '<span style="width:18px;flex-shrink:0"></span>'
+      : '<input type="checkbox" class="alb-checkbox" data-idx="' + i + '" style="width:18px;height:18px;flex-shrink:0;cursor:pointer" onchange="actualizarContadorAlbaranes()" onclick="event.stopPropagation()" />';
+    return '<div class="albaran-item" style="' + itemStyle + '">' +
+      chk +
       '<div style="flex:1;cursor:pointer" onclick="verDetalle(' + i + ')">' +
         '<div class="albaran-header">' +
           '<div>' +
-            '<div class="albaran-num">APP-' + a.Number + ' <span style="font-weight:400;color:var(--gris-texto);font-size:12px">Serie ' + a.Serie + '</span></div>' +
+            '<div class="albaran-num">APP-' + a.Number + ' <span style="font-weight:400;color:var(--gris-texto);font-size:12px">Serie ' + a.Serie + '</span> ' + factBadge + '</div>' +
             '<div class="albaran-cliente">' + cliente + '</div>' +
             '<div class="albaran-fecha">' + fecha + ' &nbsp;' + emailBadge + '</div>' +
           '</div>' +
@@ -3927,7 +3950,15 @@ function renderAlbaranes() {
         '</div>' +
       '</div>' +
     '</div>';
-  }).join('');
+  };
+  // Sin facturar arriba (estándar); facturados agrupados y en gris debajo
+  const _sinF = [], _conF = [];
+  albaranesFiltrados.forEach((a, i) => { (_albEstaFacturado(a) ? _conF : _sinF).push(_rowHTML(a, i)); });
+  let _html = _sinF.join('');
+  if (_conF.length) {
+    _html += '<div style="margin:14px 0 6px;font-size:12px;font-weight:700;color:var(--gris-texto);border-top:1.5px dashed #dde;padding-top:10px">✅ Facturados (' + _conF.length + ')</div>' + _conF.join('');
+  }
+  listEl.innerHTML = _html;
 }
 
 function verDetalle(i) {
@@ -3936,7 +3967,7 @@ function verDetalle(i) {
   const cliente = a.Customer ? (a.Customer.BusinessName || a.Customer.FiscalName || '') : '';
   const fecha = a.Date ? a.Date.split('T')[0] : '';
   const procesado = false;
-  const facturado = a.Status === 'Invoiced';
+  const facturado = _albEstaFacturado(a);
 
   // Check local cache
   const ref = a.Serie + '-' + a.Number;
