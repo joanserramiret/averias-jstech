@@ -2139,12 +2139,39 @@ function initGmail() {
   // Google Identity Services loads async
 }
 
-function enviarEmailDocWrapper(doc, tipo) {
-  if (typeof google === 'undefined' || !google.accounts) {
-    alert('La API de Google no está cargada. Asegúrate de estar usando la app desde GitHub Pages (https://...) y con conexión a internet.');
-    return;
+// Envía un documento (factura/albarán) por email vía SMTP del bridge (/correo/enviar) — el MISMO que
+// usa el reclamador del contable (info@js-tech.es). Sustituye a la antigua vía Gmail/OAuth (que no iba).
+async function _enviarDocCorreo(doc, tipo, destinoOverride) {
+  const c = doc.Customer || {};
+  const destino = destinoOverride || c._emailAgora || c.Email || '';
+  if (!destino) throw new Error('Sin email de cliente');
+  const ref = doc.Serie + '-' + doc.Number;
+  const nombre = c.BusinessName || c.FiscalName || '';
+  const asunto = (tipo === 'factura' ? 'Factura ' : 'Albarán ') + ref + ' - JS Technology Menorca';
+  const cuerpo = 'Estimado/a ' + nombre + ',\n\nAdjunto su ' + (tipo === 'factura' ? 'factura' : 'albarán') + ' ' + ref + ' en formato PDF.\n\nQuedamos a su disposición.\n\nAtentamente,\nJS Technology Menorca SL\nTel: 690868959';
+  const b64 = await blobABase64(await generarPDFBlob(doc, tipo));
+  const r = await fetch(BRIDGE_URL + '/correo/enviar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+    body: JSON.stringify({ de: 'info@js-tech.es', para: destino, asunto: asunto, cuerpo: cuerpo, adjuntos: [{ nombre: ref + '.pdf', base64: b64 }] })
+  });
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || 'Error del servidor de correo');
+  return destino;
+}
+async function enviarEmailDocWrapper(doc, tipo) {
+  const c = doc.Customer || {};
+  let destino = c._emailAgora || c.Email || '';
+  if (!destino) {
+    destino = (prompt('Email del cliente para enviar el ' + (tipo === 'factura' ? 'factura' : 'albarán') + ':', '') || '').trim();
+    if (!destino) return;
   }
-  enviarEmailDoc(doc, tipo);
+  try {
+    await _enviarDocCorreo(doc, tipo, destino);
+    alert('✅ Enviado a ' + destino);
+  } catch(e) {
+    alert('✗ Error al enviar: ' + e.message);
+  }
 }
 
 function solicitarGmailToken(callback) {
@@ -3363,26 +3390,24 @@ async function enviarSeleccionadosAlbaranes() {
     '\n\n¿Continuar?';
   if (!confirm(msg)) return;
 
-  solicitarGmailToken(async token => {
-    let enviados = 0, errores = 0;
-    const statusEl = document.getElementById('buscar-status');
-    setStatus(statusEl, 'Enviando 0/' + conEmail.length + '...', 'info');
-    for (const a of conEmail) {
-      try {
-        await enviarEmailDocConToken(a, 'albaran', token);
-        enviados++;
-        setStatus(statusEl, 'Enviando ' + enviados + '/' + conEmail.length + '...', 'info');
-      } catch(e) {
-        errores++;
-        console.error('Error:', e);
-      }
+  let enviados = 0, errores = 0;
+  const statusEl = document.getElementById('buscar-status');
+  setStatus(statusEl, 'Enviando 0/' + conEmail.length + '...', 'info');
+  for (const a of conEmail) {
+    try {
+      await _enviarDocCorreo(a, 'albaran');
+      enviados++;
+      setStatus(statusEl, 'Enviando ' + enviados + '/' + conEmail.length + '...', 'info');
+    } catch(e) {
+      errores++;
+      console.error('Error:', e);
     }
-    setStatus(statusEl,
-      '✓ ' + enviados + ' enviado/s.' +
-      (errores ? ' ✗ ' + errores + ' error/es.' : '') +
-      (sinEmail.length ? ' ⚠ ' + sinEmail.length + ' sin email omitido/s.' : ''),
-      errores ? 'error' : 'success');
-  });
+  }
+  setStatus(statusEl,
+    '✓ ' + enviados + ' enviado/s.' +
+    (errores ? ' ✗ ' + errores + ' error/es.' : '') +
+    (sinEmail.length ? ' ⚠ ' + sinEmail.length + ' sin email omitido/s.' : ''),
+    errores ? 'error' : 'success');
 }
 
 async function enviarSeleccionadas() {

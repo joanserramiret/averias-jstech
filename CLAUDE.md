@@ -81,6 +81,13 @@ App web de gestión de **averías / órdenes de trabajo (OT)** de JS-TECH, servi
   reparados** (antes `switchTab('nueva')` petaba y dejaba pantalla en blanco).
 - **Producto nuevo** (`crearYAnadirProducto`): `UseAsDirectSale:false` → entra en Ágora SIN crear botón de venta
   directa en la pantalla de familias (sigue siendo vendible: `SaleableAsMain:true`).
+- **Email de factura/albarán por SMTP del bridge (no Gmail) [2026-06-13]**: el envío de documentos por email ya NO usa la
+  API de Gmail/OAuth (no iba). Ahora llama a **`POST /correo/enviar`** (el MISMO que el reclamador del contable; ambos apps
+  apuntan al mismo bridge `panel.js-tech.es`) con `{de:'info@js-tech.es', para, asunto, cuerpo, adjuntos:[{nombre, base64}]}`.
+  Helper `_enviarDocCorreo(doc,tipo,destinoOverride)` (genera el PDF con `generarPDFBlob` → `blobABase64` → adjunto). Lo usan
+  `enviarEmailDocWrapper` (envío individual; pide el email si falta) y `enviarSeleccionadosAlbaranes` (lote, sin token Gmail).
+  `enviarEmailDoc`/`enviarEmailDocConToken`/`solicitarGmailToken` quedan como código muerto. ⚠️ OJO: el `bridge.py` de la
+  carpeta conectada parece DESFASADO (no muestra `/correo/enviar`), pero el bridge vivo de `panel.js-tech.es` SÍ lo tiene.
 - **GOTCHA mount**: editar `averias_agora.html` con la herramienta Edit deja el HOST correcto, pero si la edición
   ACORTA el fichero, la copia del mount (bash) muestra **bytes nulos al final** (tras `</html>`) — es artefacto del
   sandbox, NO del fichero real. Verificar el final con Read del host, no con el conteo de nulos de bash.
