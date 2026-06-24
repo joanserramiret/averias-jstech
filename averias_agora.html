@@ -2159,15 +2159,32 @@ async function _enviarDocCorreo(doc, tipo, destinoOverride) {
   if (!j.ok) throw new Error(j.error || 'Error del servidor de correo');
   return destino;
 }
+// Resuelve el email del cliente vía el bridge (/clientes/email lee el Ágora de JST — NUESTRA API,
+// no la de feria/Menorca Rons). Prioriza lo que ya trae el doc; si no, lo pide al bridge por CIF/nombre.
+async function _emailDeCliente(doc) {
+  const c = doc.Customer || {};
+  if (c._emailAgora) return c._emailAgora;
+  if (c.Email) return c.Email;
+  try {
+    const cif = encodeURIComponent(c.Cif || '');
+    const nombre = encodeURIComponent(c.FiscalName || c.BusinessName || '');
+    const r = await fetch(BRIDGE_URL + '/clientes/email?cif=' + cif + '&cliente=' + nombre, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const j = await r.json();
+    return (j && j.email) || '';
+  } catch(e) { return ''; }
+}
 async function enviarEmailDocWrapper(doc, tipo) {
   const c = doc.Customer || {};
-  let destino = c._emailAgora || c.Email || '';
-  if (!destino) {
-    destino = (prompt('Email del cliente para enviar el ' + (tipo === 'factura' ? 'factura' : 'albarán') + ':', '') || '').trim();
-    if (!destino) return;
-  }
+  let destino = await _emailDeCliente(doc);   // del Ágora de JST; si vacío, el prompt sale en blanco para teclearlo
+  destino = (prompt('Email del cliente (revísalo antes de enviar):', destino || '') || '').trim();
+  if (!destino) return;
   try {
     await _enviarDocCorreo(doc, tipo, destino);
+    // Recordar el email para la próxima (Ágora manda; esto es respaldo para clientes sin email en Ágora)
+    try {
+      const nombre = c.FiscalName || c.BusinessName || '';
+      if (nombre && destino.indexOf('@') !== -1) fetch(BRIDGE_URL + '/clientes/email', { method: 'POST', headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' }, body: JSON.stringify({ cliente: nombre, email: destino }) });
+    } catch(_) {}
     alert('✅ Enviado a ' + destino);
   } catch(e) {
     alert('✗ Error al enviar: ' + e.message);
@@ -3372,12 +3389,13 @@ async function enviarSeleccionadosAlbaranes() {
 
   const seleccionados = Array.from(checkboxes).map(cb => albaranesFiltrados[+cb.dataset.idx]);
 
-  seleccionados.forEach(a => {
-    if (a.Customer) {
+  for (const a of seleccionados) {
+    if (a.Customer && !(a.Customer._emailAgora || a.Customer.Email)) {
       const cl = todosClientes.find(c => c.Id === a.Customer.Id);
       if (cl && cl.Email) a.Customer._emailAgora = cl.Email;
+      else a.Customer._emailAgora = await _emailDeCliente({ Customer: a.Customer });  // resuelve por el Ágora de JST
     }
-  });
+  }
 
   const getEmail = a => (a.Customer && (a.Customer._emailAgora || a.Customer.Email)) || '';
   const conEmail = seleccionados.filter(a => getEmail(a));

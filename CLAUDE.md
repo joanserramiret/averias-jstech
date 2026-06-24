@@ -85,9 +85,15 @@ App web de gestión de **averías / órdenes de trabajo (OT)** de JS-TECH, servi
   API de Gmail/OAuth (no iba). Ahora llama a **`POST /correo/enviar`** (el MISMO que el reclamador del contable; ambos apps
   apuntan al mismo bridge `panel.js-tech.es`) con `{de:'info@js-tech.es', para, asunto, cuerpo, adjuntos:[{nombre, base64}]}`.
   Helper `_enviarDocCorreo(doc,tipo,destinoOverride)` (genera el PDF con `generarPDFBlob` → `blobABase64` → adjunto). Lo usan
-  `enviarEmailDocWrapper` (envío individual; pide el email si falta) y `enviarSeleccionadosAlbaranes` (lote, sin token Gmail).
-  `enviarEmailDoc`/`enviarEmailDocConToken`/`solicitarGmailToken` quedan como código muerto. ⚠️ OJO: el `bridge.py` de la
-  carpeta conectada parece DESFASADO (no muestra `/correo/enviar`), pero el bridge vivo de `panel.js-tech.es` SÍ lo tiene.
+  `enviarEmailDocWrapper` (envío individual) y `enviarSeleccionadosAlbaranes` (lote, sin token Gmail).
+  `enviarEmailDoc`/`enviarEmailDocConToken`/`solicitarGmailToken` quedan como código muerto.
+- **Email del cliente desde NUESTRA API (no la de feria) [2026-06-13]**: el destinatario se resuelve con
+  **`GET /clientes/email?cif=<cif>&cliente=<nombre>`** (helper `_emailDeCliente`), que lee el **Ágora de JST** (Ágora manda).
+  Mismo bug que arreglamos en el contable: antes se cargaba de la API equivocada (feria/Menorca Rons) y salía vacío → había
+  que teclearlo a mano. Ahora `enviarEmailDocWrapper` **pre-rellena** el email real (prompt editable para revisar) y tras
+  enviar lo **guarda** (`POST /clientes/email`) como respaldo. El lote también resuelve por el bridge.
+  ⚠️ OJO: el `bridge.py` de la carpeta conectada sale TRUNCADO por bash (no se ven `/correo/enviar` ni `/clientes/email`),
+  pero el bridge vivo de `panel.js-tech.es` SÍ los tiene (`/correo/enviar` está en bridge.py línea ~12821).
 - **GOTCHA mount**: editar `averias_agora.html` con la herramienta Edit deja el HOST correcto, pero si la edición
   ACORTA el fichero, la copia del mount (bash) muestra **bytes nulos al final** (tras `</html>`) — es artefacto del
   sandbox, NO del fichero real. Verificar el final con Read del host, no con el conteo de nulos de bash.
