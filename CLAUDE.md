@@ -94,6 +94,18 @@ App web de gestión de **averías / órdenes de trabajo (OT)** de JS-TECH, servi
   enviar lo **guarda** (`POST /clientes/email`) como respaldo. El lote también resuelve por el bridge.
   ⚠️ OJO: el `bridge.py` de la carpeta conectada sale TRUNCADO por bash (no se ven `/correo/enviar` ni `/clientes/email`),
   pero el bridge vivo de `panel.js-tech.es` SÍ los tiene (`/correo/enviar` está en bridge.py línea ~12821).
+- **OTs: cerrar de un clic + sin "Facturado" + estado del círculo [2026-06-13]**: botón **"🟢 Cerrar OT"** en cada fila
+  (`cerrarOTDirecta(otId)` → `PUT /ot {estado:'cerrado'}`). Los **técnicos solo cierran**; facturar es de admins. Quitado el
+  estado **Facturado** de las OTs (select de edición + filtro `ot-filtro-estado`): quedan 🟡 Pendiente / 🔵 En curso / 🟢
+  Cerrado. Cada OT muestra **📦 Albarán APP-N** y, para admins, **✅ Facturado F-N** o **⏳ Sin facturar** (cruza
+  `_albFacturados`, que se carga en `loadOTs` con `cargarAlbFacturados`).
+- **Jordi = Jordi Aguilar [2026-06-13]**: helper `_aliasTecnico` ("Jordi"→"Jordi Aguilar") aplicado en `obtenerTecnicos`,
+  `poblarSelectTecnicoOT` y la visibilidad/filtro por técnico de `renderOTs` (así Jordi ve/filtra sus OTs viejas "Jordi" y
+  nuevas como una sola). Los datos viejos conservan "Jordi" pero se muestran/comparan como "Jordi Aguilar".
+- **Ficha de cliente COMPLETA [2026-06-13]**: la lista de Clientes (`renderClientes`) muestra ahora la ficha entera por
+  cliente — **nombre fiscal** (título) + Comercial + CIF/NIF + Dirección + Tel + Email + Contacto + observaciones (antes
+  solo el comercial). `filtrarClientesTab` busca por fiscal/comercial/CIF/ciudad/tel/email/contacto/calle. El form de
+  edición ya tenía todos los campos. (Si un campo sale vacío = Ágora no lo tiene para ese cliente.)
 - **GOTCHA mount**: editar `averias_agora.html` con la herramienta Edit deja el HOST correcto, pero si la edición
   ACORTA el fichero, la copia del mount (bash) muestra **bytes nulos al final** (tras `</html>`) — es artefacto del
   sandbox, NO del fichero real. Verificar el final con Read del host, no con el conteo de nulos de bash.

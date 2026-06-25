@@ -2282,12 +2282,10 @@ let clienteEditandoId = null;
 function filtrarClientesTab() {
   const q = (document.getElementById('clientes-buscar').value || '').trim().toLowerCase();
   clientesFiltrados = q
-    ? todosClientes.filter(c => {
-        const nombre = (c.BusinessName || c.FiscalName || '').toLowerCase();
-        const cif = (c.Cif || '').toLowerCase();
-        const ciudad = (c.City || '').toLowerCase();
-        return nombre.includes(q) || cif.includes(q) || ciudad.includes(q);
-      }).slice(0, 50)
+    ? todosClientes.filter(c =>
+        [c.FiscalName, c.BusinessName, c.Cif, c.City, c.Telephone, c.Email, c.ContactPerson, c.Street]
+          .some(v => (v || '').toLowerCase().includes(q))
+      ).slice(0, 50)
     : todosClientes.slice(0, 50);
   renderClientes();
 }
@@ -2299,18 +2297,25 @@ function renderClientes() {
     return;
   }
   listEl.innerHTML = clientesFiltrados.map((c, i) => {
-    const nombre = c.BusinessName || c.FiscalName || '';
-    const detalle = [c.Cif, c.City, c.Telephone, c.Email].filter(Boolean).join(' · ');
+    const fiscal = c.FiscalName || c.BusinessName || '(sin nombre)';
+    const comercial = (c.BusinessName && c.BusinessName !== c.FiscalName) ? c.BusinessName : '';
     const tipo = c.CustomerType || '';
+    const dir = [c.Street, [c.ZipCode, c.City].filter(Boolean).join(' '), c.Region].filter(Boolean).join(', ');
     const obs = c.Observations || '';
+    const fila = (etq, val) => val ? '<div style="font-size:12px;color:#444"><span style="color:#999">' + etq + ':</span> ' + val + '</div>' : '';
     return '<div class="albaran-item" onclick="abrirDetalleCliente(' + i + ')" style="cursor:pointer">' +
       '<div class="albaran-header">' +
-        '<div>' +
-          '<div class="albaran-num">' + nombre + (tipo ? ' <span style="font-size:11px;background:#eef;color:#556;padding:1px 6px;border-radius:10px">' + tipo + '</span>' : '') + '</div>' +
-          '<div class="albaran-fecha">' + detalle + '</div>' +
-          (obs ? '<div style="font-size:11px;color:var(--gris-texto);font-style:italic;margin-top:2px">' + obs.substring(0,60) + (obs.length>60?'...':'') + '</div>' : '') +
+        '<div style="min-width:0">' +
+          '<div class="albaran-num">' + fiscal + (tipo ? ' <span style="font-size:11px;background:#eef;color:#556;padding:1px 6px;border-radius:10px">' + tipo + '</span>' : '') + '</div>' +
+          fila('Comercial', comercial) +
+          fila('CIF/NIF', c.Cif) +
+          fila('Dirección', dir) +
+          fila('Tel', c.Telephone) +
+          fila('Email', c.Email) +
+          fila('Contacto', c.ContactPerson) +
+          (obs ? '<div style="font-size:11px;color:var(--gris-texto);font-style:italic;margin-top:2px">📝 ' + obs.substring(0,80) + (obs.length>80?'...':'') + '</div>' : '') +
         '</div>' +
-        '<div style="display:flex;gap:8px">' +
+        '<div style="display:flex;gap:8px;flex-shrink:0">' +
           '<button class="secondary-btn" style="padding:4px 10px;font-size:12px" onclick="event.stopPropagation();editarCliente(' + i + ')">✏️</button>' +
           '<button class="secondary-btn" style="padding:4px 10px;font-size:12px;color:#c00" onclick="event.stopPropagation();eliminarCliente(' + i + ')">🗑️</button>' +
         '</div>' +
