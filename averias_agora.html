@@ -883,7 +883,6 @@
         <option value="pendiente">🟡 Pendiente</option>
         <option value="en_curso">🔵 En curso</option>
         <option value="cerrado">🟢 Cerrado</option>
-        <option value="facturado">⚫ Facturado</option>
       </select>
       <select id="ot-filtro-tecnico" onchange="renderOTs()" style="padding:8px 12px;border:1.5px solid var(--gris-borde,#dde);border-radius:8px;font-size:13px;font-family:inherit">
         <option value="">Todos los técnicos</option>
@@ -936,7 +935,6 @@
           <option value="pendiente">🟡 Pendiente</option>
           <option value="en_curso">🔵 En curso</option>
           <option value="cerrado">🟢 Cerrado</option>
-          <option value="facturado">⚫ Facturado</option>
         </select>
       </div>
     </div>
@@ -4433,6 +4431,7 @@ async function loadOTs() {
         }
       }
     });
+    if (CURRENT_USER_ROLE !== 'tecnico') { try { await cargarAlbFacturados(); } catch(e){} }  // estado facturado para el badge de la OT
     poblarFiltroTecnicos();
     renderOTs();
   } catch(e) {
@@ -4442,21 +4441,36 @@ async function loadOTs() {
   }
 }
 
+// Cerrar una OT de un clic (los técnicos solo cierran; facturar es de admins).
+async function cerrarOTDirecta(otId) {
+  const ot = todasOTs.find(o => o.id === otId);
+  if (!ot || ot.estado === 'cerrado') return;
+  if (!confirm('¿Cerrar la OT ' + ot.id + (ot.cliente && ot.cliente.nombre ? ' · ' + ot.cliente.nombre : '') + '?')) return;
+  try {
+    const r = await fetch(BRIDGE_URL + '/ot/' + otId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ estado: 'cerrado' })
+    });
+    if (!r.ok) throw new Error('El bridge respondió ' + r.status);
+    await loadOTs();
+  } catch(e) { alert('Error al cerrar la OT: ' + e.message); }
+}
 function renderOTs() {
   const listEl = document.getElementById('ot-list');
   const q = (document.getElementById('ot-buscar').value || '').trim().toLowerCase();
   let lista = todasOTs;
   // Técnicos: solo sus OTs y las que están sin asignar
   if (CURRENT_USER_ROLE === 'tecnico') {
-    const yo = (CURRENT_USER_NAME || '').toLowerCase();
-    lista = lista.filter(o => !o.tecnico || (o.tecnico || '').toLowerCase() === yo);
+    const yo = _aliasTecnico(CURRENT_USER_NAME).toLowerCase();
+    lista = lista.filter(o => !o.tecnico || _aliasTecnico(o.tecnico).toLowerCase() === yo);
   }
   // Filtro por técnico (admins)
   const fTec = (document.getElementById('ot-filtro-tecnico') || {}).value || '';
   if (fTec === '__sin__') {
     lista = lista.filter(o => !o.tecnico);
   } else if (fTec) {
-    lista = lista.filter(o => (o.tecnico || '').toLowerCase() === fTec.toLowerCase());
+    lista = lista.filter(o => _aliasTecnico(o.tecnico).toLowerCase() === _aliasTecnico(fTec).toLowerCase());
   }
   // Filtro por estado: por DEFECTO solo pendientes + en curso; cerradas/facturadas SOLO si se eligen en el desplegable.
   const _selEst = document.getElementById('ot-filtro-estado');
@@ -4481,7 +4495,15 @@ function renderOTs() {
 
   listEl.innerHTML = lista.map(o => {
     const est = OT_ESTADOS[o.estado] || { label: o.estado, color: '#888' };
-    const alb = o.albaran ? `<span style="background:#e8f0fb;color:#1a2e6e;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">${o.albaran.serie}-${o.albaran.numero}</span>` : '';
+    const _albFref = o.albaran ? _albFacturados[o.albaran.numero] : '';
+    const alb = o.albaran
+      ? (`<span style="background:#e8f0fb;color:#1a2e6e;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">📦 ${o.albaran.serie}-${o.albaran.numero}</span>`
+         + (CURRENT_USER_ROLE !== 'tecnico'
+            ? (_albFref
+               ? ` <span style="background:#e8f7ef;color:#1a7a3f;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">✅ Facturado ${_albFref}</span>`
+               : ` <span style="background:#fff4e0;color:#c96a10;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">⏳ Sin facturar</span>`)
+            : ''))
+      : '';
     const fact = o.factura ? `<span style="background:#e8f7ef;color:#1a7a3f;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">${o.factura.serie}-${o.factura.numero}</span>` : '';
     const firmaFecha = o.firma_fecha ? o.firma_fecha.slice(0,16).replace('T',' ') : '';
     const firma = o.firma
@@ -4505,6 +4527,7 @@ function renderOTs() {
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
           ${!o.tecnico ? `<button onclick="asignarmeOT('${o.id}')" style="padding:5px 12px;background:#e87e1a;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🙋 Asignarme</button>` : ''}
+          ${o.estado !== 'cerrado' ? `<button onclick="cerrarOTDirecta('${o.id}')" style="padding:5px 12px;background:#1a7a3f;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🟢 Cerrar OT</button>` : ''}
           <button onclick="abrirModalEditarOT('${o.id}')" style="padding:5px 12px;background:#f0f4fb;border:1.5px solid #c0cbea;color:#1a2e6e;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">✏️ Editar</button>
           <button onclick="abrirVincularAlbaran('${o.id}')" style="padding:5px 12px;background:${o.albaran ? '#e8f7ef' : '#fff4e0'};border:1.5px solid ${o.albaran ? '#27ae60' : '#e87e1a'};color:${o.albaran ? '#1a7a3f' : '#c96a10'};border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">${o.albaran ? '🔗 ' + o.albaran.serie + '-' + o.albaran.numero : '🔗 Vincular albarán'}</button>
           <button onclick="descargarOTPDF('${o.id}')" style="padding:5px 12px;background:#5a6380;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">📄 PDF</button>
@@ -4529,7 +4552,13 @@ function obtenerTecnicos() {
   // Y además, cualquier nombre que ya figure en OTs (por si es histórico)
   todasOTs.forEach(o => { if (o.tecnico) set.add((o.tecnico || '').trim()); });
   set.delete('');
-  return [...set].sort();
+  return [...new Set([...set].map(_aliasTecnico).filter(Boolean))].sort();
+}
+// Unifica nombres del MISMO técnico (alias). "Jordi" (histórico) = "Jordi Aguilar".
+function _aliasTecnico(n) {
+  const t = (n || '').trim();
+  if (/^jordi$/i.test(t)) return 'Jordi Aguilar';
+  return t;
 }
 
 function poblarFiltroTecnicos() {
@@ -4556,7 +4585,7 @@ function poblarFiltroTecnicos() {
 function poblarSelectTecnicoOT(valor) {
   const sel = document.getElementById('ot-tecnico');
   if (!sel || sel.tagName !== 'SELECT') return;
-  const v = (valor !== undefined && valor !== null) ? String(valor) : (sel.value || '');
+  const v = _aliasTecnico((valor !== undefined && valor !== null) ? String(valor) : (sel.value || ''));
   let tecnicos = obtenerTecnicos();
   if (v && tecnicos.indexOf(v) === -1) tecnicos = [v].concat(tecnicos);
   sel.innerHTML = '<option value="">— Sin asignar —</option>' +
