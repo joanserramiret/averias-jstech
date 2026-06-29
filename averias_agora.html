@@ -1053,6 +1053,35 @@
         <input type="email" id="nco-email" placeholder="correo@ejemplo.com"
           style="width:100%;padding:9px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-top:4px"/>
       </div>
+      <div>
+        <label style="font-size:11px;font-weight:700;color:#1a2e6e;text-transform:uppercase;letter-spacing:.5px">Dirección</label>
+        <input type="text" id="nco-street" placeholder="Calle, número..."
+          style="width:100%;padding:9px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-top:4px"/>
+      </div>
+      <div style="display:flex;gap:10px">
+        <div style="flex:1">
+          <label style="font-size:11px;font-weight:700;color:#1a2e6e;text-transform:uppercase;letter-spacing:.5px">CP</label>
+          <input type="text" id="nco-zip" inputmode="numeric" placeholder="07720"
+            style="width:100%;padding:9px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-top:4px"/>
+        </div>
+        <div style="flex:2">
+          <label style="font-size:11px;font-weight:700;color:#1a2e6e;text-transform:uppercase;letter-spacing:.5px">Ciudad / Población</label>
+          <input type="text" id="nco-city" placeholder="Maó"
+            style="width:100%;padding:9px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-top:4px"/>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <div style="flex:1">
+          <label style="font-size:11px;font-weight:700;color:#1a2e6e;text-transform:uppercase;letter-spacing:.5px">Provincia</label>
+          <input type="text" id="nco-province" placeholder="Baleares"
+            style="width:100%;padding:9px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-top:4px"/>
+        </div>
+        <div style="flex:1">
+          <label style="font-size:11px;font-weight:700;color:#1a2e6e;text-transform:uppercase;letter-spacing:.5px">Contacto</label>
+          <input type="text" id="nco-contact" placeholder="Persona de contacto"
+            style="width:100%;padding:9px 12px;border:1.5px solid #dde;border-radius:8px;font-size:13px;margin-top:4px"/>
+        </div>
+      </div>
     </div>
     <div id="nco-error" style="color:#c0392b;font-size:12px;margin-top:10px;display:none"></div>
     <div style="display:flex;gap:10px;margin-top:18px">
@@ -5314,6 +5343,11 @@ async function guardarClienteOT() {
   const cif      = document.getElementById('nco-cif').value.trim();
   const tel      = document.getElementById('nco-tel').value.trim();
   const email    = document.getElementById('nco-email').value.trim();
+  const street   = (document.getElementById('nco-street').value || '').trim();
+  const zip      = (document.getElementById('nco-zip').value || '').trim();
+  const city     = (document.getElementById('nco-city').value || '').trim();
+  const province = (document.getElementById('nco-province').value || '').trim();
+  const contact  = (document.getElementById('nco-contact').value || '').trim();
   const errEl    = document.getElementById('nco-error');
   const btn      = document.getElementById('btn-guardar-cliente-ot');
 
@@ -5327,6 +5361,8 @@ async function guardarClienteOT() {
       BusinessName: comercial || fiscal,
       Cif: cif, CountryCode: 'ES',
       Telephone: tel, Email: email,
+      Street: street, City: city, ZipCode: zip, Region: province,
+      ContactPerson: contact,
       ApplySurcharge: false, SendMailing: false,
       RequireIdentificationCard: false, DiscountRate: 0.0
     }]
@@ -5334,7 +5370,7 @@ async function guardarClienteOT() {
 
   try {
     await agoraPost('/api/import/', body);
-    const newClient = { Id: newId, FiscalName: fiscal, BusinessName: comercial || fiscal, Cif: cif, Telephone: tel, Email: email };
+    const newClient = { Id: newId, FiscalName: fiscal, BusinessName: comercial || fiscal, Cif: cif, Telephone: tel, Email: email, Street: street, City: city, ZipCode: zip, Region: province, ContactPerson: contact, CountryCode: 'ES' };
     todosClientes.push(newClient);
     seleccionarClienteOT(newClient);
     cerrarCrearClienteOT();
