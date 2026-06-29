@@ -106,6 +106,24 @@ App web de gestión de **averías / órdenes de trabajo (OT)** de JS-TECH, servi
   cliente — **nombre fiscal** (título) + Comercial + CIF/NIF + Dirección + Tel + Email + Contacto + observaciones (antes
   solo el comercial). `filtrarClientesTab` busca por fiscal/comercial/CIF/ciudad/tel/email/contacto/calle. El form de
   edición ya tenía todos los campos. (Si un campo sale vacío = Ágora no lo tiene para ese cliente.)
+- **Crear cliente desde OT — TODOS los campos de Ágora [2026-06-13]**: el modal "➕ Nuevo cliente" (que se abre desde la
+  OT, `modal-crear-cliente-ot`) solo pedía fiscal/comercial/CIF/tel/email. Añadidos **Dirección** (`nco-street`→`Street`),
+  **CP** (`nco-zip`→`ZipCode`), **Ciudad/Población** (`nco-city`→`City`), **Provincia** (`nco-province`→`Region`) y
+  **Contacto** (`nco-contact`→`ContactPerson`). `guardarClienteOT` los lee y los mete en el `Customers:[{...}]` del
+  `POST /api/import/` (+ en el objeto local `newClient` para que la selección inmediata ya los tenga). `CountryCode:'ES'`
+  se mantiene. Así el alta rápida desde la OT mapea la ficha entera, no solo lo mínimo.
+- **FACTURA/ALBARÁN con el TEMPLATE NUEVO (idéntico al panel contable) [2026-06-13]**: el email/preview/PDF de averías
+  generaba la factura con `generarDocHTML` (formato ANTIGUO, logo base64) → Joan mandó una a Silvia y "no es el formato
+  correcto, es el antiguo; dijimos que todo iría con el nuevo". Portado a averías el render EXACTO del contable:
+  **`generarHTMLFactura(f, tipo)` + `generarPDFBlobC(f, tipo)` + `fmC`/`fdC` + `CABECERA_FACTURA_URL`** (réplica al
+  milímetro del PDF de Ágora, cabecera = bitmap `cabecera_factura.png` del repo, IVA agrupado, IBAN, LOPD). `tipo`
+  parametriza el título (factura/abono vs **ALBARÁN**), así **facturas Y albaranes** usan la misma plantilla pixel-a-pixel.
+  Cableado: `previsualizarDoc` y `generarPDFBlob` **derivan** `tipo==='factura'||'albaran'` al template nuevo
+  (`generarPDFBlob` hace `return generarPDFBlobC(...)` al principio) → email (`_enviarDocCorreo`), 🖨️ Ver/Imprimir y 📄 PDF
+  salen ya con el formato nuevo. ⚠️ El template nuevo va en **mm** con `.page` fija (210×297) → usa el holder de contable
+  (NO el de averías, que forzaba `.page{padding;width:794px}` y descuadraba las posiciones absolutas). `generarDocHTML`
+  (antiguo) queda como código muerto solo para tipos no factura/albarán. (El portal usa su propio `factura_template.js`;
+  idea futura: migrarlo también a `generarHTMLFactura` para de-duplicar.)
 - **GOTCHA mount**: editar `averias_agora.html` con la herramienta Edit deja el HOST correcto, pero si la edición
   ACORTA el fichero, la copia del mount (bash) muestra **bytes nulos al final** (tras `</html>`) — es artefacto del
   sandbox, NO del fichero real. Verificar el final con Read del host, no con el conteo de nulos de bash.
