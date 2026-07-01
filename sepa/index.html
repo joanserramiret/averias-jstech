@@ -107,7 +107,7 @@ small.mut{color:#778}
 </div>
 
 </div>
-<input type="file" id="fSubir" accept="application/pdf" style="display:none" onchange="subirPDF(event)">
+<input type="file" id="fSubir" accept="application/pdf,image/*" style="display:none" onchange="subirPDF(event)">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 const BRIDGE='https://sepa.js-tech.es';
@@ -225,7 +225,7 @@ async function cargarMandatos(){
       `<tr><td>${fd(m.creado)}</td><td>${m.cliente}</td><td>${m.referencia}</td>
        <td>${m.firmado?'<span class="tag si">firmado '+fd(m.firma_fecha)+'</span>':'<span class="tag no">pendiente</span>'}</td>
        <td>${m.firmado?'<a href="'+BRIDGE+'/sepa/firmado/'+m.token+'" target="_blank">PDF</a>'
-         :`<a href="${BRIDGE}/sepa/f/${m.token}" target="_blank">enlace</a> · <a href="#" onclick="pedirPDF('${m.token}');return false" title="Subir el PDF que el cliente firmó por su cuenta">📎 subir firmado</a>`}
+         :`<a href="${BRIDGE}/sepa/f/${m.token}" target="_blank">enlace</a> · <a href="#" onclick="pedirPDF('${m.token}');return false" title="Subir el mandato firmado: PDF o foto (JPG/PNG, p.ej. de WhatsApp)">📎 subir firmado (PDF o foto)</a>`}
         · <a href="#" style="color:#a32" onclick="anular('${m.token}','${m.referencia}');return false" title="Anular este mandato para poder repetirlo">🗑</a></td></tr>`).join('');
   }catch(e){}
 }
@@ -245,8 +245,8 @@ async function subirPDF(ev){
   try{
     const r=await fetch(BRIDGE+'/sepa/firmado_manual/'+SUBIR_TK,{method:'POST',body:fd,headers:H});
     const j=await r.json();
-    if(j.ok){alert('PDF archivado. Mandato marcado como firmado.');cargarMandatos();}
-    else alert(j.error||'Error subiendo el PDF');
+    if(j.ok){alert('Archivado. Mandato marcado como firmado.');cargarMandatos();}
+    else alert(j.error||'Error subiendo el fichero');
   }catch(e){alert('Sin conexión con el bridge.');}
 }
 // ── LOGIN (misma lógica que averías: usuarios de Ágora, solo perfiles admin) ──
